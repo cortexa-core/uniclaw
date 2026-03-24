@@ -4,3 +4,6 @@
 .env
 logs/
 .DS_Store
+.claude/
+data/sessions/
+data/memory/MEMORY.md

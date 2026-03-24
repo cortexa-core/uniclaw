@@ -3,12 +3,15 @@ max_iterations = 10
 max_tool_calls_per_iteration = 4
 consolidation_threshold = 40
 context_cache_ttl_secs = 60
+memory_max_bytes = 8192
+session_max_age_days = 30
+session_max_count = 100
 
 [llm]
-provider = "openai_compatible"
-api_key_env = "OPENAI_API_KEY"
-model = "gpt-4o-mini"
-base_url = "https://api.openai.com"
+provider = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+model = "claude-sonnet-4-6"
+base_url = "https://api.anthropic.com"
 max_tokens = 1024
 temperature = 0.7
 timeout_secs = 60
@@ -22,9 +25,12 @@ timeout_secs = 60
 
 [server]
 http_enabled = true
-http_port = 3001
+http_port = 3000
 http_bind = "0.0.0.0"
 mqtt_enabled = false
+mqtt_broker = "localhost"
+mqtt_port = 1883
+mqtt_device_id = "miniclaw-01"
 
 [cron]
 enabled = true
@@ -33,6 +39,13 @@ check_interval_secs = 60
 [heartbeat]
 enabled = true
 interval_secs = 1800
+
+[tools]
+shell_enabled = true
+shell_allowed_commands = ["ls", "cat", "date", "df", "free", "uptime", "ping", "wc"]
+shell_timeout_secs = 10
+http_fetch_enabled = true
+http_fetch_timeout_secs = 15
 
 [logging]
 level = "info"

@@ -7,9 +7,49 @@ pub struct Config {
     pub agent: AgentConfig,
     pub llm: LlmConfig,
     #[serde(default)]
+    pub server: Option<ServerConfig>,
+    #[serde(default)]
+    pub cron: Option<CronConfig>,
+    #[serde(default)]
+    pub heartbeat: Option<HeartbeatConfig>,
+    #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct ServerConfig {
+    #[serde(default = "default_true")]
+    pub http_enabled: bool,
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+    #[serde(default = "default_http_bind")]
+    pub http_bind: String,
+    #[serde(default = "default_true")]
+    pub mqtt_enabled: bool,
+    #[serde(default = "default_mqtt_broker")]
+    pub mqtt_broker: String,
+    #[serde(default = "default_mqtt_port")]
+    pub mqtt_port: u16,
+    #[serde(default = "default_device_id")]
+    pub mqtt_device_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct CronConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_cron_interval")]
+    pub check_interval_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct HeartbeatConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_heartbeat_interval")]
+    pub interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -112,6 +152,13 @@ fn default_true() -> bool { true }
 fn default_shell_timeout() -> u64 { 10 }
 fn default_http_timeout() -> u64 { 15 }
 fn default_log_level() -> String { "info".to_string() }
+fn default_http_port() -> u16 { 3000 }
+fn default_http_bind() -> String { "0.0.0.0".to_string() }
+fn default_mqtt_broker() -> String { "localhost".to_string() }
+fn default_mqtt_port() -> u16 { 1883 }
+fn default_device_id() -> String { "miniclaw-01".to_string() }
+fn default_cron_interval() -> u64 { 60 }
+fn default_heartbeat_interval() -> u64 { 1800 }
 
 #[cfg(test)]
 mod tests {
