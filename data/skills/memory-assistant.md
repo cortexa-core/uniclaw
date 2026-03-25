@@ -1,8 +1,6 @@
 ---
 name: memory-assistant
 description: Guide for when and how to use long-term memory
-always: true
-priority: 90
 ---
 
 ## Memory Management
