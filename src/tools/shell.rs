@@ -35,13 +35,23 @@ impl Tool for ShellExecTool {
             None => return ToolResult::Error("Missing required parameter: command".into()),
         };
 
+        // Reject shell metacharacters that allow command chaining/injection
+        const DANGEROUS_CHARS: &[char] = &[';', '&', '|', '`', '$', '(', ')', '{', '}', '<', '>'];
+        if command.chars().any(|c| DANGEROUS_CHARS.contains(&c)) {
+            return ToolResult::Error(
+                "Command contains disallowed shell characters (;, &, |, `, $, etc.). \
+                 Only simple commands are allowed."
+                    .into(),
+            );
+        }
+
         // Parse allowed commands from config
-        let allowed: HashSet<String> = ctx
+        let allowed: HashSet<&str> = ctx
             .config
             .tools
             .shell_allowed_commands
             .iter()
-            .cloned()
+            .map(|s| s.as_str())
             .collect();
 
         // Extract the program name (first word)

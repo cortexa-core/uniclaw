@@ -8,29 +8,38 @@ use super::registry::{Tool, ToolContext, ToolResult};
 /// Validate that a requested path doesn't escape the data directory.
 pub fn validate_path(data_dir: &Path, requested: &str) -> Result<PathBuf> {
     let requested = requested.trim_start_matches('/');
-    let joined = data_dir.join(requested);
 
-    // For existing files, canonicalize and check
+    // Reject traversal attempts immediately — before any filesystem operations
+    if requested.contains("..") {
+        return Err(anyhow!("Path traversal not allowed"));
+    }
+
+    let data_dir_canonical = data_dir
+        .canonicalize()
+        .map_err(|e| anyhow!("Data directory not accessible: {e}"))?;
+    let joined = data_dir_canonical.join(requested);
+
+    // For existing files, canonicalize and verify containment
     if joined.exists() {
         let canonical = joined.canonicalize()?;
-        if !canonical.starts_with(data_dir.canonicalize()?) {
+        if !canonical.starts_with(&data_dir_canonical) {
             return Err(anyhow!("Path escapes data directory"));
         }
         return Ok(canonical);
     }
 
-    // For new files, check parent exists and doesn't escape
-    let parent = joined.parent().ok_or_else(|| anyhow!("Invalid path"))?;
-    if parent.exists() {
-        let canonical_parent = parent.canonicalize()?;
-        if !canonical_parent.starts_with(data_dir.canonicalize()?) {
-            return Err(anyhow!("Path escapes data directory"));
+    // For new files, walk up to the nearest existing ancestor and verify it's inside data_dir.
+    // This prevents creating files in directories outside the sandbox.
+    let mut ancestor = joined.parent();
+    while let Some(dir) = ancestor {
+        if dir.exists() {
+            let canonical_ancestor = dir.canonicalize()?;
+            if !canonical_ancestor.starts_with(&data_dir_canonical) {
+                return Err(anyhow!("Path escapes data directory"));
+            }
+            break;
         }
-    }
-
-    // Check for obvious traversal attempts
-    if requested.contains("..") {
-        return Err(anyhow!("Path traversal not allowed"));
+        ancestor = dir.parent();
     }
 
     Ok(joined)

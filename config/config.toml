@@ -34,5 +34,12 @@ check_interval_secs = 60
 enabled = true
 interval_secs = 1800
 
+[tools]
+shell_enabled = true
+shell_allowed_commands = ["ls", "cat", "date", "df", "free", "uptime", "ping", "wc", "ifconfig", "hostname", "whoami", "uname", "curl"]
+shell_timeout_secs = 10
+http_fetch_enabled = true
+http_fetch_timeout_secs = 15
+
 [logging]
 level = "info"

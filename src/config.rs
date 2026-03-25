@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -15,6 +15,7 @@ pub struct Config {
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
+    #[allow(dead_code)] // used in future phases for file logging
     pub logging: LoggingConfig,
 }
 

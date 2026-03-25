@@ -16,15 +16,9 @@ struct DeviceStatus {
 
 #[derive(Deserialize)]
 struct MqttMessage {
-    #[serde(default = "default_type")]
-    r#type: String,
     #[serde(default)]
     session_id: String,
     content: String,
-}
-
-fn default_type() -> String {
-    "chat".into()
 }
 
 pub async fn mqtt_task(

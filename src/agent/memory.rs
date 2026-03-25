@@ -86,7 +86,9 @@ impl SessionStore {
             let session = self.load_from_disk(id).unwrap_or_else(|_| Session::new(id));
             self.sessions.insert(id.to_string(), session);
         }
-        self.sessions.get_mut(id).unwrap()
+        self.sessions
+            .get_mut(id)
+            .expect("session was just inserted; this is a bug if it fails")
     }
 
     pub fn persist(&self, id: &str) -> Result<()> {
@@ -143,11 +145,13 @@ impl MemoryManager {
         Self { data_dir }
     }
 
+    #[allow(dead_code)] // used by future memory tools and consolidation
     pub fn read_memory(&self) -> Result<String> {
         let path = self.data_dir.join("memory/MEMORY.md");
         Ok(std::fs::read_to_string(&path).unwrap_or_default())
     }
 
+    #[allow(dead_code)]
     pub fn append_memory(&self, key: &str, value: &str) -> Result<()> {
         let path = self.data_dir.join("memory/MEMORY.md");
         let mut content = std::fs::read_to_string(&path).unwrap_or_default();
@@ -157,6 +161,7 @@ impl MemoryManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn append_daily_note(&self, note: &str) -> Result<()> {
         let date = chrono::Local::now().format("%Y-%m-%d");
         let path = self.data_dir.join(format!("memory/{date}.md"));

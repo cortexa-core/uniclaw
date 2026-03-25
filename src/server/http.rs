@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::agent::{Input, Output};
 
@@ -26,8 +26,6 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .with_state(state)
 }
 
-// --- Request/Response types ---
-
 #[derive(Deserialize)]
 struct ChatRequest {
     message: String,
@@ -40,26 +38,11 @@ fn default_session() -> String {
 }
 
 #[derive(Serialize)]
-struct ChatApiResponse {
-    response: String,
-    session_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    input_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output_tokens: Option<u32>,
-}
-
-#[derive(Serialize)]
 struct StatusResponse {
     version: String,
     model: String,
     uptime_secs: u64,
     status: String,
-}
-
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
 }
 
 // --- Handlers ---
@@ -76,7 +59,6 @@ async fn chat_handler(
 
     let (reply_tx, reply_rx) = oneshot::channel();
 
-    // Send to agent worker
     if state.inbound_tx.send((input, reply_tx)).await.is_err() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -84,7 +66,6 @@ async fn chat_handler(
         );
     }
 
-    // Wait for response with timeout (60s)
     match tokio::time::timeout(std::time::Duration::from_secs(60), reply_rx).await {
         Ok(Ok(output)) => {
             let (input_tokens, output_tokens) = match &output.usage {

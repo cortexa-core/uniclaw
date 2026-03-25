@@ -98,7 +98,7 @@ impl Tool for HttpFetchTool {
 
 /// Scan response body for any known secrets and redact them.
 /// This implements the credential boundary injection pattern from IronClaw.
-fn redact_known_secrets(text: &str, ctx: &ToolContext) -> String {
+fn redact_known_secrets(text: &str, _ctx: &ToolContext) -> String {
     let mut result = text.to_string();
 
     // Check all known API keys from env vars

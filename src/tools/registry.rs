@@ -1,4 +1,3 @@
-use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,6 +12,7 @@ pub enum ToolResult {
 }
 
 impl ToolResult {
+    #[allow(dead_code)]
     pub fn content(&self) -> &str {
         match self {
             ToolResult::Success(s) => s,
@@ -27,6 +27,7 @@ impl ToolResult {
 
 pub struct ToolContext {
     pub data_dir: PathBuf,
+    #[allow(dead_code)] // available for future tool use
     pub session_id: String,
     pub config: Arc<Config>,
 }
@@ -82,6 +83,7 @@ impl ToolRegistry {
         }
     }
 
+    #[allow(dead_code)]
     pub fn tool_names(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
     }

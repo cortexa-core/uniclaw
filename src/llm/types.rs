@@ -34,6 +34,7 @@ impl Message {
         }
     }
 
+    #[allow(dead_code)] // used in tests and future consolidation
     pub fn assistant(text: &str) -> Self {
         Self {
             role: Role::Assistant,

@@ -31,6 +31,7 @@ pub struct AgentConfig {
 
 /// Input to the agent — all sources normalize to this.
 pub struct Input {
+    #[allow(dead_code)] // used for logging and request tracking
     pub id: String,
     pub session_id: String,
     pub content: String,

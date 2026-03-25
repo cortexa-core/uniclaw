@@ -1,8 +1,8 @@
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::llm::types::{Context, Message, ToolSchema};
+use crate::llm::types::{Context, ToolSchema};
 use super::memory::Session;
 
 pub struct ContextBuilder {
@@ -90,7 +90,12 @@ impl ContextBuilder {
             });
         }
 
-        let system = self.cached_system.as_ref().unwrap().prompt.clone();
+        let system = self
+            .cached_system
+            .as_ref()
+            .expect("cache was just populated above")
+            .prompt
+            .clone();
         let messages = session.messages_for_context();
 
         Ok(Context {
@@ -100,6 +105,7 @@ impl ContextBuilder {
         })
     }
 
+    #[allow(dead_code)] // used in future phases
     pub fn invalidate_cache(&mut self) {
         self.cached_system = None;
     }
