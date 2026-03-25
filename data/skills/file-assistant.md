@@ -1,8 +1,6 @@
 ---
 name: file-assistant
 description: Best practices for file operations
-tags: [file, read, write, edit, directory, list, create]
-priority: 60
 ---
 
 ## File Operations

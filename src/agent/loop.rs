@@ -114,12 +114,11 @@ impl Agent {
         for iteration in 0..self.config.max_iterations {
             tracing::debug!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
 
-            // Build context (skills selected per-turn based on user input)
+            // Build context
             let tool_schemas = self.tool_registry.schemas();
             let context = self.context_builder.build(
                 self.session_store.get_or_load(&input.session_id),
                 &tool_schemas,
-                &input.content,
             )?;
 
             // Call LLM with failover

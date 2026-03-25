@@ -1,8 +1,6 @@
 ---
 name: system-monitor
 description: System monitoring and diagnostics patterns
-tags: [system, cpu, memory, disk, temperature, status, health, uptime]
-priority: 50
 requires:
   tools: [system_info, shell_exec]
 ---
