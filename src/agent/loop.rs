@@ -69,16 +69,21 @@ impl Agent {
             memory_max_bytes: config.agent.memory_max_bytes,
         };
 
+        // Initialize context builder with skill manager
+        let mut context_builder = ContextBuilder::new(
+            data_dir.clone(),
+            config.agent.context_cache_ttl_secs,
+        );
+        let tool_names: Vec<String> = tool_registry.tool_names().iter().map(|s| s.to_string()).collect();
+        context_builder.set_available_tools(tool_names);
+
         Self {
             llm,
             fallback_llm,
             tool_registry,
             memory: MemoryManager::new(data_dir.clone()),
             session_store: SessionStore::new(data_dir.clone()),
-            context_builder: ContextBuilder::new(
-                data_dir.clone(),
-                config.agent.context_cache_ttl_secs,
-            ),
+            context_builder,
             config: agent_config,
             full_config: Arc::new(config.clone()),
             data_dir,

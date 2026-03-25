@@ -4,10 +4,12 @@ use std::time::{Duration, Instant};
 
 use crate::llm::types::{Context, ToolSchema};
 use super::memory::Session;
+use super::skills::SkillManager;
 
 pub struct ContextBuilder {
     data_dir: PathBuf,
     cached_system: Option<CachedSystem>,
+    skill_manager: Option<SkillManager>,
     ttl: Duration,
     budgets: ContextBudgets,
 }
@@ -66,9 +68,16 @@ impl ContextBuilder {
         Self {
             data_dir,
             cached_system: None,
+            skill_manager: None,
             ttl: Duration::from_secs(ttl_secs),
             budgets: ContextBudgets::default(),
         }
+    }
+
+    /// Set available tool names for skill gating
+    pub fn set_available_tools(&mut self, tool_names: Vec<String>) {
+        let skills_dir = self.data_dir.join("skills");
+        self.skill_manager = Some(SkillManager::load(&skills_dir, &tool_names));
     }
 
     pub fn build(
@@ -148,11 +157,12 @@ impl ContextBuilder {
             parts.push(format!("## Recent Notes\n\n{truncated}"));
         }
 
-        // 6. Skills
-        let skills = self.load_skills();
-        if !skills.is_empty() {
-            let truncated = truncate_at_boundary(&skills, self.budgets.skills_max);
-            parts.push(format!("## Available Skills\n\n{truncated}"));
+        // 6. Skills (via SkillManager with gating + budget)
+        if let Some(ref skill_mgr) = self.skill_manager {
+            let skills = skill_mgr.select_for_prompt(self.budgets.skills_max);
+            if !skills.is_empty() {
+                parts.push(format!("## Active Skills\n\n{skills}"));
+            }
         }
 
         Ok(parts.join("\n\n---\n\n"))
@@ -214,25 +224,7 @@ impl ContextBuilder {
             .join("\n\n")
     }
 
-    fn load_skills(&self) -> String {
-        let skills_dir = self.data_dir.join("skills");
-        let entries = match std::fs::read_dir(&skills_dir) {
-            Ok(e) => e,
-            Err(_) => return String::new(),
-        };
 
-        entries
-            .flatten()
-            .filter(|e| {
-                e.file_name().to_string_lossy().ends_with(".md")
-            })
-            .filter_map(|e| {
-                let content = std::fs::read_to_string(e.path()).ok()?;
-                Some(content)
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n")
-    }
 }
 
 /// Truncate a string at a paragraph boundary (double newline) near max_bytes.
