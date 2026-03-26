@@ -1,10 +1,8 @@
 # MiniClaw
 
-A privacy-first AI agent that runs on a Raspberry Pi.
+A privacy-first AI agent that runs on resource-constrained edge devices — Raspberry Pi, BeagleBone, cheap ARM boards, and beyond.
 
-**3.4MB binary. 5.5MB RAM. 13 tools. Full ReAct agent loop.**
-
-MiniClaw is a lightweight, self-hosted AI agent for resource-constrained ARM Linux devices. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.
+MiniClaw is a lightweight, self-hosted AI agent designed for edge deployment. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.
 
 ```
 $ ./miniclaw chat --message "What time is it?"
@@ -197,7 +195,7 @@ cargo install cargo-zigbuild
 rustup target add aarch64-unknown-linux-gnu
 
 cargo zigbuild --target aarch64-unknown-linux-gnu --release
-# Binary at: target/aarch64-unknown-linux-gnu/release/miniclaw (3.4MB)
+# Binary at: target/aarch64-unknown-linux-gnu/release/miniclaw
 ```
 
 ### Cross-compile for other targets
@@ -242,36 +240,6 @@ src/
     cron.rs            Cron scheduler
     heartbeat.rs       Proactive task poller
 ```
-
-## Roadmap
-
-- [x] ReAct agent loop with parallel tool execution
-- [x] Anthropic + OpenAI-compatible LLM providers with failover
-- [x] 13 built-in tools with sandboxing
-- [x] Session persistence + memory consolidation
-- [x] HTTP API + MQTT + cron + heartbeat server
-- [x] Skill system (markdown files, requirement gating)
-- [x] Security hardening (path validation, shell injection prevention, credential injection)
-- [ ] Privacy gate (on-device S1/S2/S3 classifier + PII stripping)
-- [ ] MCP client (connect to any MCP server)
-- [ ] Voice pipeline (cloud STT + local Piper TTS)
-- [ ] Hardware I/O (GPIO, I2C, SPI)
-- [ ] Offline graceful degradation
-- [ ] Web UI
-
-## Comparison
-
-| | MiniClaw | OpenClaw | IronClaw | PicoClaw | NanoBot |
-|---|---|---|---|---|---|
-| Language | Rust | TypeScript | Rust | Go | Python |
-| Binary | 3.4 MB | 28 MB+ | 3.4 MB | ~20 MB | N/A |
-| RAM | 5.5 MB | 1.5 GB | 7.8 MB | 10-20 MB | 150 MB |
-| Target | Edge SBCs | Desktop/server | Desktop/server | Cheap SBCs | Desktop |
-| Agent loop | Local | Local | Local | Local | Local |
-| Privacy | Planned | No | No | No | No |
-| Voice | Planned | No | No | Whisper | No |
-| HW I/O | Planned | No | No | I2C/SPI | No |
-| Offline | Planned | No | No | No | No |
 
 ## License
 
