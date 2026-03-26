@@ -1,6 +1,7 @@
 mod agent;
 mod config;
 mod llm;
+mod mcp;
 mod server;
 mod tools;
 
@@ -113,7 +114,7 @@ fn setup_logging() {
         .init();
 }
 
-fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
+async fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
     std::fs::create_dir_all(data_dir.join("memory"))?;
     std::fs::create_dir_all(data_dir.join("sessions"))?;
     std::fs::create_dir_all(data_dir.join("skills"))?;
@@ -127,6 +128,12 @@ fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
 
     let mut tool_registry = tools::registry::ToolRegistry::new();
     tools::register_default_tools(&mut tool_registry);
+
+    // Connect to MCP servers and register their tools
+    if !config.mcp_servers.is_empty() {
+        let _clients = mcp::register_mcp_tools(&config.mcp_servers, &mut tool_registry).await;
+        // Note: clients are kept alive by the Arc<McpClient> inside each McpTool
+    }
 
     Ok(Agent::new(primary, fallback, tool_registry, config, data_dir.clone()))
 }
@@ -172,7 +179,7 @@ async fn run_chat(
 ) -> Result<()> {
     setup_logging();
     let config = Config::load(config_path)?;
-    let agent = create_agent(&config, data_dir)?;
+    let agent = create_agent(&config, data_dir).await?;
     let inbound_tx = spawn_agent_worker(agent);
 
     // Single-shot mode
@@ -240,7 +247,7 @@ async fn run_chat(
 async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
     setup_logging();
     let config = Config::load(config_path)?;
-    let agent = create_agent(&config, data_dir)?;
+    let agent = create_agent(&config, data_dir).await?;
     let inbound_tx = spawn_agent_worker(agent);
 
     tracing::info!("MiniClaw v{} starting server mode", env!("CARGO_PKG_VERSION"));

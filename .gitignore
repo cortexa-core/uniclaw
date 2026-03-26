@@ -11,3 +11,4 @@ dist/
 CLAUDE.md
 DESIGN.md
 PLAN.md
+config/config.toml

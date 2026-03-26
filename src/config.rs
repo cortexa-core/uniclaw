@@ -13,6 +13,8 @@ pub struct Config {
     #[serde(default)]
     pub heartbeat: Option<HeartbeatConfig>,
     #[serde(default)]
+    pub mcp_servers: Vec<crate::mcp::client::McpServerConfig>,
+    #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
     #[allow(dead_code)] // used in future phases for file logging
