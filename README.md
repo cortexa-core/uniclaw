@@ -218,16 +218,6 @@ cargo zigbuild --target x86_64-unknown-linux-gnu --release
 cargo test    # 147 tests, zero warnings
 ```
 
-## Resource Usage
-
-| Metric | Value |
-|--------|-------|
-| Binary size | **3.4 MB** (release, stripped, LTO) |
-| RAM idle (server mode) | **5.5 MB** |
-| RAM peak (during LLM call) | **~10-15 MB** |
-| Startup time | **< 100 ms** |
-| Minimum RAM | **64 MB** (after OS) |
-
 ## Project Structure
 
 ```
