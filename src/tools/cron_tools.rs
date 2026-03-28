@@ -63,7 +63,7 @@ impl Tool for CronAddTool {
             enabled: true,
         };
 
-        let mut jobs = cron::load_cron_jobs(&ctx.data_dir);
+        let mut jobs = cron::load_cron_jobs(&ctx.data_dir).await;
 
         // Max 16 jobs
         if jobs.len() >= 16 {
@@ -72,7 +72,7 @@ impl Tool for CronAddTool {
 
         jobs.push(job);
 
-        match cron::save_cron_jobs(&ctx.data_dir, &jobs) {
+        match cron::save_cron_jobs(&ctx.data_dir, &jobs).await {
             Ok(_) => ToolResult::Success(format!(
                 "Created cron job '{name}' (id={id}), runs every {interval}s"
             )),
@@ -98,7 +98,7 @@ impl Tool for CronListTool {
     }
 
     async fn execute(&self, _args: serde_json::Value, ctx: &ToolContext) -> ToolResult {
-        let jobs = cron::load_cron_jobs(&ctx.data_dir);
+        let jobs = cron::load_cron_jobs(&ctx.data_dir).await;
 
         if jobs.is_empty() {
             return ToolResult::Success("No cron jobs scheduled.".into());
@@ -158,7 +158,7 @@ impl Tool for CronRemoveTool {
             None => return ToolResult::Error("Missing required parameter: id".into()),
         };
 
-        let mut jobs = cron::load_cron_jobs(&ctx.data_dir);
+        let mut jobs = cron::load_cron_jobs(&ctx.data_dir).await;
         let before = jobs.len();
         jobs.retain(|j| j.id != id);
 
@@ -166,9 +166,76 @@ impl Tool for CronRemoveTool {
             return ToolResult::Error(format!("No cron job found with id: {id}"));
         }
 
-        match cron::save_cron_jobs(&ctx.data_dir, &jobs) {
+        match cron::save_cron_jobs(&ctx.data_dir, &jobs).await {
             Ok(_) => ToolResult::Success(format!("Removed cron job {id}")),
             Err(e) => ToolResult::Error(format!("Failed to save: {e}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    fn test_ctx(dir: &Path) -> ToolContext {
+        ToolContext {
+            data_dir: dir.to_path_buf(),
+            session_id: "test".into(),
+            config: Arc::new(
+                toml::from_str("[agent]\n[llm]\nprovider=\"test\"\nmodel=\"test\"").unwrap(),
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cron_add_list_remove_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+
+        // Add a job
+        let result = CronAddTool
+            .execute(
+                json!({"name": "Test Job", "action": "check status", "interval_seconds": 3600}),
+                &ctx,
+            )
+            .await;
+        assert!(!result.is_error());
+        assert!(result.content().contains("Test Job"));
+
+        // List jobs — should have 1
+        let result = CronListTool.execute(json!({}), &ctx).await;
+        assert!(!result.is_error());
+        assert!(result.content().contains("1 cron jobs"));
+        assert!(result.content().contains("check status"));
+
+        // Extract the job ID from the add result
+        let jobs = cron::load_cron_jobs(&dir.path().to_path_buf()).await;
+        assert_eq!(jobs.len(), 1);
+        let job_id = jobs[0].id.clone();
+
+        // Remove the job
+        let result = CronRemoveTool
+            .execute(json!({"id": job_id}), &ctx)
+            .await;
+        assert!(!result.is_error());
+
+        // List should be empty now
+        let result = CronListTool.execute(json!({}), &ctx).await;
+        assert!(result.content().contains("No cron jobs"));
+    }
+
+    #[tokio::test]
+    async fn test_cron_remove_nonexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+
+        let result = CronRemoveTool
+            .execute(json!({"id": "nonexistent"}), &ctx)
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("No cron job found"));
     }
 }

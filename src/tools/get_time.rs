@@ -37,3 +37,31 @@ impl Tool for GetTimeTool {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    fn test_ctx() -> ToolContext {
+        ToolContext {
+            data_dir: std::path::PathBuf::from("/tmp/uniclaw-test"),
+            session_id: "test".into(),
+            config: Arc::new(
+                toml::from_str("[agent]\n[llm]\nprovider=\"test\"\nmodel=\"test\"").unwrap(),
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_time_output_format() {
+        let ctx = test_ctx();
+        let result = GetTimeTool.execute(json!({}), &ctx).await;
+        assert!(!result.is_error());
+        let content = result.content();
+        assert!(content.contains("Current time:"));
+        assert!(content.contains("Timezone:"));
+        assert!(content.contains("Unix timestamp:"));
+    }
+}

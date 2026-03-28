@@ -101,7 +101,7 @@ impl Tool for ReadFileTool {
             Err(e) => return ToolResult::Error(format!("Invalid path: {e}")),
         };
 
-        match std::fs::read_to_string(&full_path) {
+        match tokio::fs::read_to_string(&full_path).await {
             Ok(content) => ToolResult::Success(content),
             Err(e) => ToolResult::Error(format!("Failed to read file: {e}")),
         }
@@ -154,12 +154,12 @@ impl Tool for WriteFileTool {
 
         // Create parent directories
         if let Some(parent) = full_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 return ToolResult::Error(format!("Failed to create directories: {e}"));
             }
         }
 
-        match std::fs::write(&full_path, content) {
+        match tokio::fs::write(&full_path, content).await {
             Ok(_) => ToolResult::Success(format!("Written {} bytes to {path}", content.len())),
             Err(e) => ToolResult::Error(format!("Failed to write file: {e}")),
         }
@@ -202,15 +202,15 @@ impl Tool for ListDirTool {
             }
         };
 
-        let entries = match std::fs::read_dir(&dir_path) {
-            Ok(entries) => entries,
+        let mut read_dir = match tokio::fs::read_dir(&dir_path).await {
+            Ok(rd) => rd,
             Err(e) => return ToolResult::Error(format!("Failed to list directory: {e}")),
         };
 
         let mut lines = Vec::new();
-        for entry in entries.flatten() {
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
             let name = entry.file_name().to_string_lossy().to_string();
-            let metadata = entry.metadata();
+            let metadata = entry.metadata().await;
             let (kind, size) = match metadata {
                 Ok(m) => {
                     if m.is_dir() {

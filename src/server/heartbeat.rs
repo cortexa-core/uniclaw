@@ -4,6 +4,18 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::agent::{Input, Output};
 
+/// Find the largest byte index <= `max` that lies on a UTF-8 character boundary.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 pub async fn heartbeat_task(
     data_dir: PathBuf,
     inbound_tx: mpsc::Sender<(Input, oneshot::Sender<Output>)>,
@@ -17,7 +29,7 @@ pub async fn heartbeat_task(
         interval.tick().await;
 
         let heartbeat_path = data_dir.join("HEARTBEAT.md");
-        let content = match std::fs::read_to_string(&heartbeat_path) {
+        let content = match tokio::fs::read_to_string(&heartbeat_path).await {
             Ok(c) => c,
             Err(_) => continue,
         };
@@ -58,9 +70,10 @@ pub async fn heartbeat_task(
         tokio::spawn(async move {
             match tokio::time::timeout(Duration::from_secs(120), reply_rx).await {
                 Ok(Ok(output)) => {
+                    let end = floor_char_boundary(&output.content, 200);
                     tracing::info!(
                         "Heartbeat response: {}",
-                        &output.content[..output.content.len().min(200)]
+                        &output.content[..end]
                     );
                 }
                 Ok(Err(_)) => tracing::warn!("Heartbeat: agent worker dropped request"),

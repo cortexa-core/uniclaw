@@ -45,15 +45,15 @@ impl Tool for MemoryStoreTool {
 
         let path = ctx.data_dir.join("memory/MEMORY.md");
         if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 return ToolResult::Error(format!("Failed to create memory directory: {e}"));
             }
         }
-        let mut content = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
         content.push_str(&format!("\n- [{timestamp}] {key}: {value}"));
 
-        match std::fs::write(&path, &content) {
+        match tokio::fs::write(&path, &content).await {
             Ok(_) => ToolResult::Success(format!("Stored in memory: {key} = {value}")),
             Err(e) => ToolResult::Error(format!("Failed to write memory: {e}")),
         }
@@ -86,7 +86,7 @@ impl Tool for MemoryReadTool {
 
     async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         let path = ctx.data_dir.join("memory/MEMORY.md");
-        let content = match std::fs::read_to_string(&path) {
+        let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(_) => return ToolResult::Success("Memory is empty.".into()),
         };

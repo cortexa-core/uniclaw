@@ -27,6 +27,7 @@ pub struct AgentConfig {
     pub max_tool_calls_per_iteration: usize,
     pub consolidation_threshold: usize,
     pub memory_max_bytes: usize,
+    pub request_timeout_secs: u64,
 }
 
 /// Input to the agent — all sources normalize to this.
@@ -88,6 +89,7 @@ impl Agent {
             max_tool_calls_per_iteration: config.agent.max_tool_calls_per_iteration,
             consolidation_threshold: config.agent.consolidation_threshold,
             memory_max_bytes: config.agent.memory_max_bytes,
+            request_timeout_secs: config.agent.request_timeout_secs,
         };
 
         // Initialize context builder with skill manager
@@ -111,18 +113,35 @@ impl Agent {
         }
     }
 
-    /// Process one input. Called only by agent_worker task (sole owner).
+    /// Process one input with a timeout guard.
+    /// Called only by agent_worker task (sole owner).
     pub async fn process(&mut self, input: &Input) -> Result<Output> {
-        // Validate session ID to prevent path traversal via crafted IDs
         validate_session_id(&input.session_id)?;
 
+        let timeout = std::time::Duration::from_secs(self.config.request_timeout_secs);
+        match tokio::time::timeout(timeout, self.process_inner(input)).await {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::warn!(
+                    "Request timed out after {}s for session {}",
+                    self.config.request_timeout_secs,
+                    input.session_id
+                );
+                // Best-effort persist before returning timeout
+                self.session_store.persist(&input.session_id).await.ok();
+                Ok(Output::text("Request timed out.".to_string()))
+            }
+        }
+    }
+
+    async fn process_inner(&mut self, input: &Input) -> Result<Output> {
         // Consolidation deferred from previous turn — runs before new input
         let needs_consolidation = {
-            let session = self.session_store.get_or_load(&input.session_id);
+            let session = self.session_store.get_or_load(&input.session_id).await;
             session.needs_consolidation
         };
         if needs_consolidation {
-            let session = self.session_store.get_or_load(&input.session_id);
+            let session = self.session_store.get_or_load(&input.session_id).await;
             if let Err(e) = self.memory
                 .consolidate(session, &*self.llm, self.config.memory_max_bytes)
                 .await
@@ -130,12 +149,12 @@ impl Agent {
                 tracing::warn!("Consolidation failed: {e}");
             } else {
                 // Persist the consolidated session so changes survive a crash
-                self.session_store.persist(&input.session_id).ok();
+                self.session_store.persist(&input.session_id).await.ok();
             }
         }
 
         // Add user message
-        let session = self.session_store.get_or_load(&input.session_id);
+        let session = self.session_store.get_or_load(&input.session_id).await;
         session.add_message(Role::User, &input.content);
 
         // ReAct loop
@@ -145,10 +164,10 @@ impl Agent {
 
             // Build context
             let tool_schemas = self.tool_registry.schemas();
-            let context = self.context_builder.build(
-                self.session_store.get_or_load(&input.session_id),
-                &tool_schemas,
-            )?;
+            let context = {
+                let session = self.session_store.get_or_load(&input.session_id).await;
+                self.context_builder.build(session, &tool_schemas).await?
+            };
 
             // Call LLM with failover
             let response = self.call_llm(&context).await?;
@@ -160,20 +179,20 @@ impl Agent {
                     let text = response.text.unwrap_or_default();
 
                     {
-                        let session = self.session_store.get_or_load(&input.session_id);
+                        let session = self.session_store.get_or_load(&input.session_id).await;
                         session.add_message(Role::Assistant, &text);
                         // Flag consolidation for next turn if over threshold
                         if session.message_count() > self.config.consolidation_threshold {
                             session.needs_consolidation = true;
                         }
                     }
-                    self.session_store.persist(&input.session_id)?;
+                    self.session_store.persist(&input.session_id).await?;
 
                     return Ok(Output::with_usage(text, total_usage));
                 }
                 StopReason::ToolUse => {
                     // Record assistant message with tool calls
-                    let session = self.session_store.get_or_load(&input.session_id);
+                    let session = self.session_store.get_or_load(&input.session_id).await;
                     session.add_tool_use_message(&response);
 
                     // Execute tools in parallel
@@ -194,7 +213,7 @@ impl Agent {
                         .await;
 
                     // Add tool results to session
-                    let session = self.session_store.get_or_load(&input.session_id);
+                    let session = self.session_store.get_or_load(&input.session_id).await;
                     for (tc, result) in tool_calls.iter().zip(results) {
                         tracing::info!(
                             "Tool {} result: {}",
@@ -209,10 +228,10 @@ impl Agent {
         }
 
         // Max iterations exceeded
-        let session = self.session_store.get_or_load(&input.session_id);
+        let session = self.session_store.get_or_load(&input.session_id).await;
         let msg = "I've reached my reasoning limit for this turn.".to_string();
         session.add_message(Role::Assistant, &msg);
-        self.session_store.persist(&input.session_id)?;
+        self.session_store.persist(&input.session_id).await?;
         Ok(Output::with_usage(msg, total_usage))
     }
 
@@ -233,5 +252,50 @@ impl Agent {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_session_id_valid() {
+        assert!(validate_session_id("cli").is_ok());
+        assert!(validate_session_id("session-123").is_ok());
+        assert!(validate_session_id("test_session.v2").is_ok());
+        assert!(validate_session_id("abc123").is_ok());
+        assert!(validate_session_id("a").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_empty() {
+        assert!(validate_session_id("").is_err());
+    }
+
+    #[test]
+    fn test_validate_session_id_path_traversal() {
+        assert!(validate_session_id("..").is_err());
+        assert!(validate_session_id("../etc/passwd").is_err());
+        assert!(validate_session_id("foo/../bar").is_err());
+        assert!(validate_session_id("a..b").is_err());
+    }
+
+    #[test]
+    fn test_validate_session_id_too_long() {
+        let long_id = "a".repeat(129);
+        assert!(validate_session_id(&long_id).is_err());
+        // Exactly 128 should be ok
+        let max_id = "a".repeat(128);
+        assert!(validate_session_id(&max_id).is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_special_chars() {
+        assert!(validate_session_id("foo/bar").is_err());
+        assert!(validate_session_id("foo\\bar").is_err());
+        assert!(validate_session_id("foo bar").is_err());
+        assert!(validate_session_id("foo\nbar").is_err());
+        assert!(validate_session_id("foo\0bar").is_err());
     }
 }

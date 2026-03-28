@@ -67,6 +67,8 @@ pub struct AgentConfig {
     pub context_cache_ttl_secs: u64,
     #[serde(default = "default_memory_max")]
     pub memory_max_bytes: usize,
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout_secs: u64,
     #[serde(default = "default_session_age")]
     pub session_max_age_days: u64,
     #[serde(default = "default_session_count")]
@@ -145,6 +147,7 @@ fn default_max_tool_calls() -> usize { 4 }
 fn default_consolidation() -> usize { 40 }
 fn default_cache_ttl() -> u64 { 60 }
 fn default_memory_max() -> usize { 8192 }
+fn default_request_timeout() -> u64 { 120 }
 fn default_session_age() -> u64 { 30 }
 fn default_session_count() -> usize { 100 }
 fn default_base_url() -> String { "https://api.anthropic.com".to_string() }

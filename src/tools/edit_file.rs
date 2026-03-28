@@ -55,7 +55,7 @@ impl Tool for EditFileTool {
             Err(e) => return ToolResult::Error(format!("Invalid path: {e}")),
         };
 
-        let content = match std::fs::read_to_string(&full_path) {
+        let content = match tokio::fs::read_to_string(&full_path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::Error(format!("Failed to read file: {e}")),
         };
@@ -68,7 +68,7 @@ impl Tool for EditFileTool {
         }
 
         let new_content = content.replacen(old_text, new_text, 1);
-        match std::fs::write(&full_path, &new_content) {
+        match tokio::fs::write(&full_path, &new_content).await {
             Ok(_) => ToolResult::Success(format!(
                 "Replaced text in {path} ({count} occurrence(s) found, replaced first)"
             )),

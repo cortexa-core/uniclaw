@@ -161,7 +161,7 @@ fn spawn_agent_worker(
             }
         }
         // Channel closed — persist sessions before exit
-        if let Err(e) = agent.session_store.persist_all() {
+        if let Err(e) = agent.session_store.persist_all().await {
             tracing::error!("Failed to persist sessions on shutdown: {e}");
         }
     });

@@ -117,3 +117,57 @@ fn redact_known_secrets(text: &str, _ctx: &ToolContext) -> String {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn test_ctx() -> ToolContext {
+        ToolContext {
+            data_dir: std::path::PathBuf::from("/tmp/uniclaw-test"),
+            session_id: "test".into(),
+            config: Arc::new(
+                toml::from_str("[agent]\n[llm]\nprovider=\"test\"\nmodel=\"test\"").unwrap(),
+            ),
+        }
+    }
+
+    #[test]
+    fn test_redact_known_secrets() {
+        // Use a single test to avoid env var race conditions between parallel tests.
+        let ctx = test_ctx();
+        let secret = "sk-test-secret-key-12345";
+
+        // 1. Set a key and verify it gets redacted
+        std::env::set_var("ANTHROPIC_API_KEY", secret);
+        let text = format!("Response containing {secret} in body");
+        let result = redact_known_secrets(&text, &ctx);
+        assert!(!result.contains(secret), "Secret should be redacted");
+        assert!(result.contains("[REDACTED]"));
+
+        // 2. Empty key should be ignored (no false positives)
+        std::env::set_var("ANTHROPIC_API_KEY", "");
+        let text = "Some response body";
+        let result = redact_known_secrets(text, &ctx);
+        assert_eq!(result, text, "Empty key should not cause redaction");
+
+        // 3. Clean up
+        std::env::remove_var("ANTHROPIC_API_KEY");
+
+        // 4. No secrets set — text passes through unchanged
+        let text = "Normal response body with no secrets";
+        let result = redact_known_secrets(text, &ctx);
+        assert_eq!(result, text, "No secrets means no redaction");
+    }
+
+    #[tokio::test]
+    async fn test_http_fetch_rejects_bad_url() {
+        let ctx = test_ctx();
+        let result = HttpFetchTool
+            .execute(serde_json::json!({"url": "ftp://evil.com"}), &ctx)
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("http://"));
+    }
+}

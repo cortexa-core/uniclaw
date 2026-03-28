@@ -29,14 +29,14 @@ impl Tool for SystemInfoTool {
         info.push(format!("UniClaw version: {}", env!("CARGO_PKG_VERSION")));
 
         // Memory info (Linux)
-        if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+        if let Ok(meminfo) = tokio::fs::read_to_string("/proc/meminfo").await {
             for line in meminfo.lines().take(3) {
                 info.push(format!("Memory: {line}"));
             }
         }
 
         // Uptime (Linux)
-        if let Ok(uptime) = std::fs::read_to_string("/proc/uptime") {
+        if let Ok(uptime) = tokio::fs::read_to_string("/proc/uptime").await {
             if let Some(secs_str) = uptime.split_whitespace().next() {
                 if let Ok(secs) = secs_str.parse::<f64>() {
                     let hours = (secs / 3600.0) as u64;
@@ -47,17 +47,44 @@ impl Tool for SystemInfoTool {
         }
 
         // CPU temp (Raspberry Pi)
-        if let Ok(temp) = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp") {
+        if let Ok(temp) = tokio::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").await {
             if let Ok(millideg) = temp.trim().parse::<f64>() {
                 info.push(format!("CPU temperature: {:.1}°C", millideg / 1000.0));
             }
         }
 
         // Hostname
-        if let Ok(hostname) = std::fs::read_to_string("/etc/hostname") {
+        if let Ok(hostname) = tokio::fs::read_to_string("/etc/hostname").await {
             info.push(format!("Hostname: {}", hostname.trim()));
         }
 
         ToolResult::Success(info.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    fn test_ctx() -> ToolContext {
+        ToolContext {
+            data_dir: std::path::PathBuf::from("/tmp/uniclaw-test"),
+            session_id: "test".into(),
+            config: Arc::new(
+                toml::from_str("[agent]\n[llm]\nprovider=\"test\"\nmodel=\"test\"").unwrap(),
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_system_info_basic() {
+        let ctx = test_ctx();
+        let result = SystemInfoTool.execute(json!({}), &ctx).await;
+        assert!(!result.is_error());
+        let content = result.content();
+        assert!(content.contains("OS:"));
+        assert!(content.contains("UniClaw version:"));
     }
 }

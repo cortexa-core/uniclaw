@@ -78,7 +78,7 @@ impl ContextBuilder {
         self.skill_manager = Some(SkillManager::load(&skills_dir, &tool_names));
     }
 
-    pub fn build(
+    pub async fn build(
         &mut self,
         session: &Session,
         tool_schemas: &[ToolSchema],
@@ -90,7 +90,7 @@ impl ContextBuilder {
         };
 
         if needs_reload {
-            let system = self.build_system_prompt()?;
+            let system = self.build_system_prompt().await?;
             self.cached_system = Some(CachedSystem {
                 prompt: system,
                 loaded_at: Instant::now(),
@@ -118,16 +118,16 @@ impl ContextBuilder {
         self.cached_system = None;
     }
 
-    fn build_system_prompt(&self) -> Result<String> {
+    async fn build_system_prompt(&self) -> Result<String> {
         let mut parts = Vec::new();
 
         // 1. SOUL.md
-        let soul = self.read_budgeted("SOUL.md", self.budgets.soul_max);
+        let soul = self.read_budgeted("SOUL.md", self.budgets.soul_max).await;
         if soul.is_empty() {
             // Auto-create default SOUL.md
             let soul_path = self.data_dir.join("SOUL.md");
             if !soul_path.exists() {
-                std::fs::write(&soul_path, DEFAULT_SOUL).ok();
+                tokio::fs::write(&soul_path, DEFAULT_SOUL).await.ok();
             }
             parts.push(DEFAULT_SOUL.to_string());
         } else {
@@ -135,7 +135,7 @@ impl ContextBuilder {
         }
 
         // 2. USER.md
-        let user = self.read_budgeted("USER.md", self.budgets.user_max);
+        let user = self.read_budgeted("USER.md", self.budgets.user_max).await;
         if !user.is_empty() {
             parts.push(format!("## User Context\n\n{user}"));
         }
@@ -144,13 +144,13 @@ impl ContextBuilder {
         parts.push(self.device_context());
 
         // 4. MEMORY.md
-        let memory = self.read_budgeted("memory/MEMORY.md", self.budgets.memory_max);
+        let memory = self.read_budgeted("memory/MEMORY.md", self.budgets.memory_max).await;
         if !memory.is_empty() {
             parts.push(format!("## Long-term Memory\n\n{memory}"));
         }
 
         // 5. Recent daily notes (last 3)
-        let notes = self.load_recent_daily_notes(3);
+        let notes = self.load_recent_daily_notes(3).await;
         if !notes.is_empty() {
             let truncated = truncate_at_boundary(&notes, self.budgets.daily_notes_max);
             parts.push(format!("## Recent Notes\n\n{truncated}"));
@@ -181,9 +181,9 @@ impl ContextBuilder {
         )
     }
 
-    fn read_budgeted(&self, relative_path: &str, max_bytes: usize) -> String {
+    async fn read_budgeted(&self, relative_path: &str, max_bytes: usize) -> String {
         let path = self.data_dir.join(relative_path);
-        match std::fs::read_to_string(&path) {
+        match tokio::fs::read_to_string(&path).await {
             Ok(content) => {
                 if content.len() > max_bytes {
                     tracing::warn!(
@@ -199,28 +199,33 @@ impl ContextBuilder {
         }
     }
 
-    fn load_recent_daily_notes(&self, count: usize) -> String {
+    async fn load_recent_daily_notes(&self, count: usize) -> String {
         let notes_dir = self.data_dir.join("memory");
-        let mut entries: Vec<_> = std::fs::read_dir(&notes_dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                // Match YYYY-MM-DD.md pattern
-                name.len() == 13 && name.ends_with(".md") && name.chars().nth(4) == Some('-')
-            })
-            .collect();
+        let mut read_dir = match tokio::fs::read_dir(&notes_dir).await {
+            Ok(rd) => rd,
+            Err(_) => return String::new(),
+        };
+
+        let mut entries = Vec::new();
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            // Match YYYY-MM-DD.md pattern
+            if name.len() == 13 && name.ends_with(".md") && name.chars().nth(4) == Some('-') {
+                entries.push(entry);
+            }
+        }
 
         // Sort by name descending (most recent first)
         entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
         entries.truncate(count);
 
-        entries
-            .iter()
-            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-            .collect::<Vec<_>>()
-            .join("\n\n")
+        let mut notes = Vec::new();
+        for entry in &entries {
+            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                notes.push(content);
+            }
+        }
+        notes.join("\n\n")
     }
 
 
@@ -295,8 +300,8 @@ mod tests {
         assert_eq!(floor_char_boundary(s, 100), 5); // beyond end
     }
 
-    #[test]
-    fn test_build_with_soul_only() {
+    #[tokio::test]
+    async fn test_build_with_soul_only() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("SOUL.md"), "# Test Agent\nYou are a test.").unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
@@ -304,27 +309,27 @@ mod tests {
 
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
-        let ctx = builder.build(&session, &[]).unwrap();
+        let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("Test Agent"));
         assert!(ctx.system.contains("Device Context"));
     }
 
-    #[test]
-    fn test_missing_soul_creates_default() {
+    #[tokio::test]
+    async fn test_missing_soul_creates_default() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
         std::fs::create_dir_all(dir.path().join("skills")).unwrap();
 
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
-        let ctx = builder.build(&session, &[]).unwrap();
+        let ctx = builder.build(&session, &[]).await.unwrap();
         assert!(ctx.system.contains("UniClaw"));
         // Verify default SOUL.md was created
         assert!(dir.path().join("SOUL.md").exists());
     }
 
-    #[test]
-    fn test_cache_reuse() {
+    #[tokio::test]
+    async fn test_cache_reuse() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("SOUL.md"), "# V1").unwrap();
         std::fs::create_dir_all(dir.path().join("memory")).unwrap();
@@ -333,10 +338,10 @@ mod tests {
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
 
-        let ctx1 = builder.build(&session, &[]).unwrap();
+        let ctx1 = builder.build(&session, &[]).await.unwrap();
         // Modify file — cache should still return V1
         std::fs::write(dir.path().join("SOUL.md"), "# V2").unwrap();
-        let ctx2 = builder.build(&session, &[]).unwrap();
+        let ctx2 = builder.build(&session, &[]).await.unwrap();
         assert_eq!(ctx1.system, ctx2.system); // cached
     }
 }

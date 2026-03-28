@@ -314,7 +314,7 @@ async fn test_multi_turn() {
     {
         let mut agent = make_agent(MockLlmClient::text("Hi!"), dir.path());
         agent.process(&test_input("Hello")).await.unwrap();
-        agent.session_store.persist_all().unwrap();
+        agent.session_store.persist_all().await.unwrap();
     }
 
     // Second turn — loads existing session

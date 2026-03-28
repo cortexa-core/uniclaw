@@ -49,22 +49,31 @@ impl CronJob {
     }
 }
 
-pub fn load_cron_jobs(data_dir: &PathBuf) -> Vec<CronJob> {
+pub async fn load_cron_jobs(data_dir: &PathBuf) -> Vec<CronJob> {
     let path = data_dir.join("cron.json");
-    if !path.exists() {
-        return Vec::new();
-    }
-    match std::fs::read_to_string(&path) {
+    match tokio::fs::read_to_string(&path).await {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
         Err(_) => Vec::new(),
     }
 }
 
-pub fn save_cron_jobs(data_dir: &PathBuf, jobs: &[CronJob]) -> Result<()> {
+pub async fn save_cron_jobs(data_dir: &PathBuf, jobs: &[CronJob]) -> Result<()> {
     let path = data_dir.join("cron.json");
     let content = serde_json::to_string_pretty(jobs)?;
-    std::fs::write(&path, content)?;
+    tokio::fs::write(&path, content).await?;
     Ok(())
+}
+
+/// Find the largest byte index <= `max` that lies on a UTF-8 character boundary.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 pub async fn cron_task(
@@ -77,7 +86,7 @@ pub async fn cron_task(
     loop {
         interval.tick().await;
 
-        let mut jobs = load_cron_jobs(&data_dir);
+        let mut jobs = load_cron_jobs(&data_dir).await;
         if jobs.is_empty() {
             continue;
         }
@@ -112,7 +121,8 @@ pub async fn cron_task(
             tokio::spawn(async move {
                 match tokio::time::timeout(Duration::from_secs(120), reply_rx).await {
                     Ok(Ok(output)) => {
-                        tracing::info!("Cron job response: {}", &output.content[..output.content.len().min(200)]);
+                        let end = floor_char_boundary(&output.content, 200);
+                        tracing::info!("Cron job response: {}", &output.content[..end]);
                     }
                     Ok(Err(_)) => tracing::warn!("Cron job: agent worker dropped request"),
                     Err(_) => tracing::warn!("Cron job timed out (120s)"),
@@ -129,7 +139,7 @@ pub async fn cron_task(
         }
 
         if changed {
-            if let Err(e) = save_cron_jobs(&data_dir, &jobs) {
+            if let Err(e) = save_cron_jobs(&data_dir, &jobs).await {
                 tracing::error!("Failed to save cron jobs: {e}");
             }
         }
@@ -207,8 +217,8 @@ mod tests {
         assert!(!job.is_due(Utc::now()));
     }
 
-    #[test]
-    fn test_cron_save_load() {
+    #[tokio::test]
+    async fn test_cron_save_load() {
         let dir = tempfile::tempdir().unwrap();
         let jobs = vec![CronJob {
             id: "test-1".into(),
@@ -218,8 +228,8 @@ mod tests {
             last_run: None,
             enabled: true,
         }];
-        save_cron_jobs(&dir.path().to_path_buf(), &jobs).unwrap();
-        let loaded = load_cron_jobs(&dir.path().to_path_buf());
+        save_cron_jobs(&dir.path().to_path_buf(), &jobs).await.unwrap();
+        let loaded = load_cron_jobs(&dir.path().to_path_buf()).await;
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "Test Job");
     }
