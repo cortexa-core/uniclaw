@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use serde_json::json;
 
 // We need to access internal modules — use the crate directly
-use miniclaw::agent::{Agent, Input};
-use miniclaw::config::Config;
-use miniclaw::llm::types::*;
-use miniclaw::llm::LlmProvider;
-use miniclaw::tools;
-use miniclaw::tools::registry::ToolRegistry;
+use uniclaw::agent::{Agent, Input};
+use uniclaw::config::Config;
+use uniclaw::llm::types::*;
+use uniclaw::llm::LlmProvider;
+use uniclaw::tools;
+use uniclaw::tools::registry::ToolRegistry;
 
 // --- MockLlmClient ---
 

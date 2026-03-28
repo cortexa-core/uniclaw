@@ -244,15 +244,15 @@ mod tests {
     fn test_load_and_gate_by_env() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("env.md"),
-            "---\nname: env-skill\ndescription: Needs env\nrequires:\n  env: [MINICLAW_TEST_98765]\n---\n\nContent.").unwrap();
+            "---\nname: env-skill\ndescription: Needs env\nrequires:\n  env: [UNICLAW_TEST_98765]\n---\n\nContent.").unwrap();
 
         let mgr = SkillManager::load(dir.path(), &[]);
         assert_eq!(mgr.skills.len(), 0);
 
-        std::env::set_var("MINICLAW_TEST_98765", "1");
+        std::env::set_var("UNICLAW_TEST_98765", "1");
         let mgr = SkillManager::load(dir.path(), &[]);
         assert_eq!(mgr.skills.len(), 1);
-        std::env::remove_var("MINICLAW_TEST_98765");
+        std::env::remove_var("UNICLAW_TEST_98765");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 [package]
-name = "miniclaw"
+name = "uniclaw"
 version = "0.1.0"
 edition = "2021"
 description = "Privacy-first AI agent OS for ARM Linux SBCs"

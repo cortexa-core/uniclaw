@@ -25,20 +25,20 @@ pub async fn mqtt_task(
     config: &Config,
     inbound_tx: mpsc::Sender<(Input, oneshot::Sender<Output>)>,
 ) -> Result<()> {
-    let device_id = &config.server.as_ref().map(|s| s.mqtt_device_id.as_str()).unwrap_or("miniclaw-01");
+    let device_id = &config.server.as_ref().map(|s| s.mqtt_device_id.as_str()).unwrap_or("uniclaw-01");
     let broker = config.server.as_ref().map(|s| s.mqtt_broker.as_str()).unwrap_or("localhost");
     let port = config.server.as_ref().map(|s| s.mqtt_port).unwrap_or(1883);
 
-    let client_id = format!("miniclaw-{}", &device_id[..device_id.len().min(8)]);
+    let client_id = format!("uniclaw-{}", &device_id[..device_id.len().min(8)]);
     let mut mqtt_options = MqttOptions::new(&client_id, broker, port);
     mqtt_options.set_keep_alive(Duration::from_secs(30));
 
     let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
 
     // Subscribe to command topic
-    let cmd_topic = format!("miniclaw/{device_id}/command");
-    let resp_topic = format!("miniclaw/{device_id}/response");
-    let status_topic = format!("miniclaw/{device_id}/status");
+    let cmd_topic = format!("uniclaw/{device_id}/command");
+    let resp_topic = format!("uniclaw/{device_id}/response");
+    let status_topic = format!("uniclaw/{device_id}/status");
 
     client
         .subscribe(&cmd_topic, QoS::AtLeastOnce)

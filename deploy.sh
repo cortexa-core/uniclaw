@@ -3,14 +3,14 @@ set -e
 
 RPI_HOST="${RPI_HOST:-rpi4.local}"
 RPI_USER="${RPI_USER:-pi}"
-RPI_DIR="${RPI_DIR:-/home/pi/miniclaw}"
+RPI_DIR="${RPI_DIR:-/home/pi/uniclaw}"
 
 echo "Building for aarch64..."
 cargo zigbuild --target aarch64-unknown-linux-gnu --release
 
 echo "Deploying to ${RPI_USER}@${RPI_HOST}..."
 rsync -avz --progress \
-  target/aarch64-unknown-linux-gnu/release/miniclaw \
+  target/aarch64-unknown-linux-gnu/release/uniclaw \
   ${RPI_USER}@${RPI_HOST}:${RPI_DIR}/
 
 rsync -avz --progress \
@@ -20,4 +20,4 @@ rsync -avz --progress \
 
 echo ""
 echo "Done. Run on RPi:"
-echo "  ssh ${RPI_USER}@${RPI_HOST} 'cd ${RPI_DIR} && ./miniclaw chat'"
+echo "  ssh ${RPI_USER}@${RPI_HOST} 'cd ${RPI_DIR} && ./uniclaw chat'"

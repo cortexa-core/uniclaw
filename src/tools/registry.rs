@@ -109,7 +109,7 @@ mod tests {
 
     fn test_ctx() -> ToolContext {
         ToolContext {
-            data_dir: PathBuf::from("/tmp/miniclaw-test"),
+            data_dir: PathBuf::from("/tmp/uniclaw-test"),
             session_id: "test".into(),
             config: Arc::new(toml::from_str::<Config>(
                 "[agent]\n[llm]\nprovider=\"anthropic\"\nmodel=\"test\""

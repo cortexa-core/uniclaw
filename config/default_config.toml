@@ -30,7 +30,7 @@ http_bind = "0.0.0.0"
 mqtt_enabled = false
 mqtt_broker = "localhost"
 mqtt_port = 1883
-mqtt_device_id = "miniclaw-01"
+mqtt_device_id = "uniclaw-01"
 
 [cron]
 enabled = true

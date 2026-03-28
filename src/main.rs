@@ -16,7 +16,7 @@ use agent::{Agent, Input, Output};
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "miniclaw", version, about = "Privacy-first AI agent for ARM Linux SBCs")]
+#[command(name = "uniclaw", version, about = "Privacy-first AI agent for ARM Linux SBCs")]
 struct Cli {
     /// Path to config file
     #[arg(long, default_value = "config/config.toml")]
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
 }
 
 fn run_init(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
-    println!("Initializing MiniClaw...");
+    println!("Initializing UniClaw...");
 
     let dirs = [
         data_dir.to_path_buf(),
@@ -99,8 +99,8 @@ fn run_init(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
     println!("\nPlease set your API key:");
     println!("  export ANTHROPIC_API_KEY=\"your-key-here\"");
     println!("\nThen run:");
-    println!("  ./miniclaw chat    # interactive chat");
-    println!("  ./miniclaw serve   # HTTP + MQTT server");
+    println!("  ./uniclaw chat    # interactive chat");
+    println!("  ./uniclaw serve   # HTTP + MQTT server");
     Ok(())
 }
 
@@ -193,7 +193,7 @@ async fn run_chat(
     let is_tty = atty_check();
     if is_tty {
         println!(
-            "MiniClaw v{} | {} | {}",
+            "UniClaw v{} | {} | {}",
             env!("CARGO_PKG_VERSION"),
             config.llm.model,
             std::env::consts::ARCH
@@ -230,7 +230,7 @@ async fn run_chat(
         match send_and_wait(&inbound_tx, trimmed, session_id).await {
             Ok(output) => {
                 if is_tty {
-                    println!("MiniClaw> {}\n", output.content);
+                    println!("UniClaw> {}\n", output.content);
                 } else {
                     println!("{}", output.content);
                 }
@@ -250,7 +250,7 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
     let agent = create_agent(&config, data_dir).await?;
     let inbound_tx = spawn_agent_worker(agent);
 
-    tracing::info!("MiniClaw v{} starting server mode", env!("CARGO_PKG_VERSION"));
+    tracing::info!("UniClaw v{} starting server mode", env!("CARGO_PKG_VERSION"));
 
     let mut tasks = Vec::new();
 

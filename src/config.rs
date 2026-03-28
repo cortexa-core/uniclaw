@@ -159,7 +159,7 @@ fn default_http_port() -> u16 { 3000 }
 fn default_http_bind() -> String { "0.0.0.0".to_string() }
 fn default_mqtt_broker() -> String { "localhost".to_string() }
 fn default_mqtt_port() -> u16 { 1883 }
-fn default_device_id() -> String { "miniclaw-01".to_string() }
+fn default_device_id() -> String { "uniclaw-01".to_string() }
 fn default_cron_interval() -> u64 { 60 }
 fn default_heartbeat_interval() -> u64 { 1800 }
 
@@ -202,10 +202,10 @@ model = "gpt-4o"
 
     #[test]
     fn test_api_key_from_env() {
-        std::env::set_var("MINICLAW_TEST_KEY", "sk-test-123");
+        std::env::set_var("UNICLAW_TEST_KEY", "sk-test-123");
         let config = LlmConfig {
             provider: "anthropic".into(),
-            api_key_env: "MINICLAW_TEST_KEY".into(),
+            api_key_env: "UNICLAW_TEST_KEY".into(),
             model: "test".into(),
             base_url: default_base_url(),
             max_tokens: 1024,
@@ -214,7 +214,7 @@ model = "gpt-4o"
             fallback: None,
         };
         assert_eq!(config.api_key().unwrap(), "sk-test-123");
-        std::env::remove_var("MINICLAW_TEST_KEY");
+        std::env::remove_var("UNICLAW_TEST_KEY");
     }
 
     #[test]

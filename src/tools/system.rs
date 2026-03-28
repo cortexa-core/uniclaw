@@ -26,7 +26,7 @@ impl Tool for SystemInfoTool {
         let mut info = Vec::new();
 
         info.push(format!("OS: {} {}", std::env::consts::OS, std::env::consts::ARCH));
-        info.push(format!("MiniClaw version: {}", env!("CARGO_PKG_VERSION")));
+        info.push(format!("UniClaw version: {}", env!("CARGO_PKG_VERSION")));
 
         // Memory info (Linux)
         if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {

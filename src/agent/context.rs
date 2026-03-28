@@ -37,9 +37,9 @@ impl Default for ContextBudgets {
     }
 }
 
-pub const DEFAULT_SOUL: &str = r#"# MiniClaw
+pub const DEFAULT_SOUL: &str = r#"# UniClaw
 
-You are MiniClaw, a helpful AI assistant running on a local device.
+You are UniClaw, a helpful AI assistant running on a local device.
 
 ## Identity
 - You are a local-first AI agent running on a Raspberry Pi
@@ -171,7 +171,7 @@ impl ContextBuilder {
         let now = chrono::Local::now();
         format!(
             "## Device Context\n\n\
-             - Device: MiniClaw v{}\n\
+             - Device: UniClaw v{}\n\
              - Platform: {} {}\n\
              - Current time: {}",
             env!("CARGO_PKG_VERSION"),
@@ -283,7 +283,7 @@ mod tests {
         let mut builder = ContextBuilder::new(dir.path().to_path_buf(), 60);
         let session = Session::new("test");
         let ctx = builder.build(&session, &[]).unwrap();
-        assert!(ctx.system.contains("MiniClaw"));
+        assert!(ctx.system.contains("UniClaw"));
         // Verify default SOUL.md was created
         assert!(dir.path().join("SOUL.md").exists());
     }

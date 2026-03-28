@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) client support
 //!
-//! Connects MiniClaw to external MCP servers, discovers their tools,
+//! Connects UniClaw to external MCP servers, discovers their tools,
 //! and registers them alongside built-in tools.
 
 pub mod protocol;

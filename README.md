@@ -1,25 +1,25 @@
-# MiniClaw
+# UniClaw
 
 A privacy-first AI agent that runs on resource-constrained edge devices — Raspberry Pi, BeagleBone, cheap ARM boards, and beyond.
 
-MiniClaw is a lightweight, self-hosted AI agent designed for edge deployment. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.
+UniClaw is a lightweight, self-hosted AI agent designed for edge deployment. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.
 
 ```
-$ ./miniclaw chat --message "What time is it?"
+$ ./uniclaw chat --message "What time is it?"
 It's 3:42 PM on Tuesday, March 25, 2026.
 
-$ ./miniclaw chat
-MiniClaw v0.1.0 | gpt-4o-mini | aarch64
+$ ./uniclaw chat
+UniClaw v0.1.0 | gpt-4o-mini | aarch64
 Type 'exit' or Ctrl+C to quit.
 
 You> Write a haiku about Raspberry Pi to haiku.txt
-MiniClaw> [writes file] Done! Here's what I wrote:
+UniClaw> [writes file] Done! Here's what I wrote:
   Small board, big ideas
   Kernel hums beneath the case
   Bits bloom in silence
 
 You> What's my system status?
-MiniClaw> [calls system_info + shell_exec]
+UniClaw> [calls system_info + shell_exec]
   OS: Linux aarch64
   CPU temp: 48.2°C
   Memory: 412MB / 4096MB used
@@ -29,16 +29,16 @@ MiniClaw> [calls system_info + shell_exec]
 
 ## Quick Start
 
-**Download a prebuilt binary** from [Releases](https://github.com/cortexa-core/miniclaw/releases), or build from source:
+**Download a prebuilt binary** from [Releases](https://github.com/cortexa-core/uniclaw/releases), or build from source:
 
 ```bash
 # Build from source
-git clone https://github.com/cortexa-core/miniclaw.git
-cd miniclaw
+git clone https://github.com/cortexa-core/uniclaw.git
+cd uniclaw
 cargo build --release
 
 # Initialize (creates config + default files)
-./target/release/miniclaw init
+./target/release/uniclaw init
 
 # Set your LLM API key
 export OPENAI_API_KEY="your-key"
@@ -46,7 +46,7 @@ export OPENAI_API_KEY="your-key"
 export ANTHROPIC_API_KEY="your-key"
 
 # Chat
-./target/release/miniclaw chat
+./target/release/uniclaw chat
 ```
 
 ### Configuration
@@ -98,7 +98,7 @@ Supports any OpenAI-compatible API: OpenAI, Ollama (local), Groq, DeepSeek, Open
 ### Server Mode
 
 ```bash
-./miniclaw serve
+./uniclaw serve
 ```
 
 Starts HTTP API + cron scheduler + heartbeat service:
@@ -148,7 +148,7 @@ All gated skills are injected into the system prompt. The LLM decides which are 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                  MiniClaw (single Rust binary)           │
+│                  UniClaw (single Rust binary)           │
 │                                                           │
 │  ┌─────────────┐  ┌──────────┐  ┌──────────────────┐   │
 │  │ Input        │  │  Agent   │  │  Output           │   │
@@ -184,7 +184,7 @@ The agent loop runs **locally**. Only LLM inference is remote. Everything else �
 
 ```bash
 cargo build --release
-# Binary at: target/release/miniclaw
+# Binary at: target/release/uniclaw
 ```
 
 ### Cross-compile for Raspberry Pi (aarch64)
@@ -195,7 +195,7 @@ cargo install cargo-zigbuild
 rustup target add aarch64-unknown-linux-gnu
 
 cargo zigbuild --target aarch64-unknown-linux-gnu --release
-# Binary at: target/aarch64-unknown-linux-gnu/release/miniclaw
+# Binary at: target/aarch64-unknown-linux-gnu/release/uniclaw
 ```
 
 ### Cross-compile for other targets

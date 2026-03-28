@@ -4,7 +4,7 @@ set -e
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 DIST_DIR="dist"
 
-echo "Building MiniClaw v${VERSION} release binaries..."
+echo "Building UniClaw v${VERSION} release binaries..."
 echo ""
 
 # Ensure targets are installed
@@ -24,7 +24,7 @@ for TARGET in "${TARGETS[@]}"; do
     echo "Building for ${TARGET}..."
     cargo zigbuild --target "$TARGET" --release 2>&1 | tail -1
 
-    BINARY="target/${TARGET}/release/miniclaw"
+    BINARY="target/${TARGET}/release/uniclaw"
     if [ ! -f "$BINARY" ]; then
         echo "  ERROR: binary not found at ${BINARY}"
         continue
@@ -34,7 +34,7 @@ for TARGET in "${TARGETS[@]}"; do
     echo "  Binary: ${SIZE}"
 
     # Package: binary + config + data
-    ARCHIVE_NAME="miniclaw-v${VERSION}-${TARGET}"
+    ARCHIVE_NAME="uniclaw-v${VERSION}-${TARGET}"
     STAGING="${DIST_DIR}/${ARCHIVE_NAME}"
     rm -rf "$STAGING"
     mkdir -p "$STAGING"/{config,data/memory,data/sessions,data/skills}
@@ -52,4 +52,4 @@ for TARGET in "${TARGETS[@]}"; do
 done
 
 echo "Done. Release archives:"
-ls -lh "${DIST_DIR}"/miniclaw-v${VERSION}-*.tar.gz
+ls -lh "${DIST_DIR}"/uniclaw-v${VERSION}-*.tar.gz

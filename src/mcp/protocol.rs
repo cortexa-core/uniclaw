@@ -82,7 +82,7 @@ pub fn initialize_params() -> Value {
         "protocolVersion": "2024-11-05",
         "capabilities": {},
         "clientInfo": {
-            "name": "miniclaw",
+            "name": "uniclaw",
             "version": env!("CARGO_PKG_VERSION")
         }
     })
