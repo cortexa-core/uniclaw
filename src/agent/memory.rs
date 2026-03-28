@@ -99,7 +99,15 @@ impl SessionStore {
             let content: String = session
                 .messages
                 .iter()
-                .map(|m| serde_json::to_string(m).unwrap_or_default())
+                .filter_map(|m| {
+                    match serde_json::to_string(m) {
+                        Ok(json) => Some(json),
+                        Err(e) => {
+                            tracing::error!("Failed to serialize message in session {id}: {e}");
+                            None
+                        }
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             std::fs::write(&path, content)?;
@@ -121,7 +129,15 @@ impl SessionStore {
         let messages: Vec<Message> = content
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| serde_json::from_str(line).ok())
+            .filter_map(|line| {
+                match serde_json::from_str(line) {
+                    Ok(msg) => Some(msg),
+                    Err(e) => {
+                        tracing::warn!("Skipping malformed message in session {id}: {e}");
+                        None
+                    }
+                }
+            })
             .collect();
 
         Ok(Session {

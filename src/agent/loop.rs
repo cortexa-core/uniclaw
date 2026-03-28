@@ -123,10 +123,15 @@ impl Agent {
         };
         if needs_consolidation {
             let session = self.session_store.get_or_load(&input.session_id);
-            self.memory
+            if let Err(e) = self.memory
                 .consolidate(session, &*self.llm, self.config.memory_max_bytes)
                 .await
-                .ok(); // Non-fatal — logged inside
+            {
+                tracing::warn!("Consolidation failed: {e}");
+            } else {
+                // Persist the consolidated session so changes survive a crash
+                self.session_store.persist(&input.session_id).ok();
+            }
         }
 
         // Add user message

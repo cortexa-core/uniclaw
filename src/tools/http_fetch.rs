@@ -69,9 +69,13 @@ impl Tool for HttpFetchTool {
                     Err(e) => return ToolResult::Error(format!("Failed to read response: {e}")),
                 };
 
-                // Truncate long responses
+                // Truncate long responses (snap to UTF-8 char boundary)
                 let body = if body.len() > 8192 {
-                    format!("{}...\n(truncated at 8192 chars, total {} chars)", &body[..8192], body.len())
+                    let mut end = 8192;
+                    while end > 0 && !body.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}...\n(truncated, total {} bytes)", &body[..end], body.len())
                 } else {
                     body
                 };

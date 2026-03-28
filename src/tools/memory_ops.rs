@@ -44,6 +44,11 @@ impl Tool for MemoryStoreTool {
         };
 
         let path = ctx.data_dir.join("memory/MEMORY.md");
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                return ToolResult::Error(format!("Failed to create memory directory: {e}"));
+            }
+        }
         let mut content = std::fs::read_to_string(&path).unwrap_or_default();
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
         content.push_str(&format!("\n- [{timestamp}] {key}: {value}"));
