@@ -1,6 +1,7 @@
 <script lang="ts">
   import Sidebar from './components/Sidebar.svelte';
   import Dashboard from './pages/Dashboard.svelte';
+  import Chat from './pages/Chat.svelte';
 
   let currentPage = $state(window.location.hash.slice(1) || '/');
 
@@ -21,8 +22,7 @@
   {#if currentPage === '/'}
     <Dashboard />
   {:else if currentPage === '/chat'}
-    <h1>Chat</h1>
-    <p style="color: var(--text-secondary)">Chat page coming soon...</p>
+    <Chat />
   {:else if currentPage === '/config'}
     <h1>Config</h1>
     <p style="color: var(--text-secondary)">Config page coming soon...</p>
