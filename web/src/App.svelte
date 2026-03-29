@@ -2,6 +2,7 @@
   import Sidebar from './components/Sidebar.svelte';
   import Dashboard from './pages/Dashboard.svelte';
   import Chat from './pages/Chat.svelte';
+  import Config from './pages/Config.svelte';
 
   let currentPage = $state(window.location.hash.slice(1) || '/');
 
@@ -24,8 +25,7 @@
   {:else if currentPage === '/chat'}
     <Chat />
   {:else if currentPage === '/config'}
-    <h1>Config</h1>
-    <p style="color: var(--text-secondary)">Config page coming soon...</p>
+    <Config />
   {:else if currentPage === '/skills'}
     <h1>Skills</h1>
     <p style="color: var(--text-secondary)">Skills page coming soon...</p>
