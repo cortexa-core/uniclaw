@@ -7,6 +7,17 @@ DIST_DIR="dist"
 echo "Building UniClaw v${VERSION} release binaries..."
 echo ""
 
+# Build web UI
+echo "Building web UI..."
+if [ -d "web" ] && [ -f "web/package.json" ]; then
+    (cd web && npm run build)
+    echo "Web UI built to web/dist/"
+    echo ""
+else
+    echo "WARNING: web/ directory not found, skipping web UI build"
+    echo ""
+fi
+
 # Ensure targets are installed
 rustup target add aarch64-unknown-linux-gnu 2>/dev/null || true
 rustup target add armv7-unknown-linux-gnueabihf 2>/dev/null || true

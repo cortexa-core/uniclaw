@@ -1,0 +1,8 @@
+{
+  "name": "UniClaw",
+  "short_name": "UniClaw",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#f59e0b",
+  "background_color": "#0a0a0a"
+}

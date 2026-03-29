@@ -8,7 +8,7 @@ logs/
 data/sessions/
 data/memory/MEMORY.md
 dist/
-web/dist/
+# web/dist/ is tracked — needed so Rust binary builds without Node.js
 web/node_modules/
 CLAUDE.md
 DESIGN.md
