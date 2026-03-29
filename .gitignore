@@ -9,6 +9,7 @@ data/sessions/
 data/memory/MEMORY.md
 dist/
 web/dist/
+web/node_modules/
 CLAUDE.md
 DESIGN.md
 PLAN.md
