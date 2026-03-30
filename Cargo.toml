@@ -52,13 +52,16 @@ uuid = { version = "1", features = ["v4"] }
 rust-embed = "8"
 mime_guess = "2"
 
+# Channels (optional)
+teloxide = { version = "0.13", features = ["macros"], optional = true }
+
 [dev-dependencies]
 tempfile = "3"
 filetime = "0.2"
 
 [features]
 default = []
-telegram = []
+telegram = ["teloxide"]
 
 [profile.release]
 lto = true
