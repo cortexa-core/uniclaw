@@ -31,6 +31,7 @@ mqtt_enabled = false
 mqtt_broker = "localhost"
 mqtt_port = 1883
 mqtt_device_id = "uniclaw-01"
+api_token_env = ""  # Set to env var name containing bearer token (e.g., "UNICLAW_API_TOKEN")
 
 [cron]
 enabled = true

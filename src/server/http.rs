@@ -1,6 +1,7 @@
 use axum::{
     extract::State,
     http::StatusCode,
+    middleware,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -20,9 +21,12 @@ pub struct HttpState {
     pub start_time: std::time::Instant,
     pub config_path: std::path::PathBuf,
     pub data_dir: std::path::PathBuf,
+    pub api_token: String,
 }
 
 pub fn router(state: Arc<HttpState>) -> Router {
+    let api_token = state.api_token.clone();
+
     Router::new()
         .route("/api/chat", post(chat_handler))
         .route("/api/status", get(status_handler))
@@ -30,6 +34,28 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/api/skills", get(super::api_skills::get_skills))
         .route("/api/chat/stream", post(super::api_stream::stream_chat))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)) // 1 MB
+        .layer(middleware::from_fn(move |req: axum::extract::Request, next: middleware::Next| {
+            let token = api_token.clone();
+            async move {
+                // Skip auth for non-API routes (static files, SPA fallback)
+                if !req.uri().path().starts_with("/api/") || token.is_empty() {
+                    return Ok(next.run(req).await);
+                }
+                // Allow GET /api/status without auth (health check)
+                if req.uri().path() == "/api/status" && req.method() == axum::http::Method::GET {
+                    return Ok(next.run(req).await);
+                }
+                let auth = req.headers()
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok());
+                match auth {
+                    Some(h) if h.strip_prefix("Bearer ").map_or(false, |t| t == token) => {
+                        Ok(next.run(req).await)
+                    }
+                    _ => Err(StatusCode::UNAUTHORIZED),
+                }
+            }
+        }))
         .fallback(super::static_files::static_handler)
         .with_state(state)
 }

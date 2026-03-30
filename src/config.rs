@@ -39,6 +39,9 @@ pub struct ServerConfig {
     pub mqtt_port: u16,
     #[serde(default = "default_device_id")]
     pub mqtt_device_id: String,
+    /// Env var name containing the bearer token for HTTP API auth (empty = no auth)
+    #[serde(default)]
+    pub api_token_env: String,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
