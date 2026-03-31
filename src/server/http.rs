@@ -55,7 +55,7 @@ pub fn router(state: Arc<HttpState>) -> Router {
                         .get("authorization")
                         .and_then(|v| v.to_str().ok());
                     match auth {
-                        Some(h) if h.strip_prefix("Bearer ").map_or(false, |t| t == token) => {
+                        Some(h) if h.strip_prefix("Bearer ") == Some(&token) => {
                             Ok(next.run(req).await)
                         }
                         _ => Err(StatusCode::UNAUTHORIZED),

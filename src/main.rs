@@ -10,7 +10,7 @@ mod utils;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn run_init(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
+fn run_init(config_path: &Path, data_dir: &Path) -> Result<()> {
     println!("Initializing UniClaw...");
 
     let dirs = [
@@ -120,7 +120,7 @@ fn setup_logging() {
         .init();
 }
 
-async fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
+async fn create_agent(config: &Config, data_dir: &Path) -> Result<Agent> {
     std::fs::create_dir_all(data_dir.join("memory"))?;
     std::fs::create_dir_all(data_dir.join("sessions"))?;
     std::fs::create_dir_all(data_dir.join("skills"))?;
@@ -141,7 +141,13 @@ async fn create_agent(config: &Config, data_dir: &PathBuf) -> Result<Agent> {
         // Note: clients are kept alive by the Arc<McpClient> inside each McpTool
     }
 
-    let mut agent = Agent::new(primary, fallback, tool_registry, config, data_dir.clone());
+    let mut agent = Agent::new(
+        primary,
+        fallback,
+        tool_registry,
+        config,
+        data_dir.to_path_buf(),
+    );
 
     // Run session GC at startup — remove expired and excess session files
     if let Err(e) = agent.cleanup_sessions().await {
@@ -181,8 +187,8 @@ fn spawn_agent_worker(mut agent: Agent) -> mpsc::Sender<(Input, oneshot::Sender<
 // --- Chat command ---
 
 async fn run_chat(
-    config_path: &PathBuf,
-    data_dir: &PathBuf,
+    config_path: &Path,
+    data_dir: &Path,
     message: Option<String>,
     session_id: &str,
 ) -> Result<()> {
@@ -253,7 +259,7 @@ async fn run_chat(
 
 // --- Serve command ---
 
-async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
+async fn run_serve(config_path: &Path, data_dir: &Path) -> Result<()> {
     setup_logging();
     let config = Config::load(config_path)?;
     let agent = create_agent(&config, data_dir).await?;
@@ -294,8 +300,8 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
             version: env!("CARGO_PKG_VERSION").into(),
             model: config.llm.model.clone(),
             start_time: std::time::Instant::now(),
-            config_path: config_path.clone(),
-            data_dir: data_dir.clone(),
+            config_path: config_path.to_path_buf(),
+            data_dir: data_dir.to_path_buf(),
             api_token,
         });
 
@@ -341,7 +347,7 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
             .as_ref()
             .map(|c| c.check_interval_secs)
             .unwrap_or(60);
-        let cron_dir = data_dir.clone();
+        let cron_dir = data_dir.to_path_buf();
         let cron_tx = inbound_tx.clone();
         tracing::info!("Cron scheduler enabled (check every {cron_interval}s)");
         tasks.push(tokio::spawn(async move {
@@ -361,7 +367,7 @@ async fn run_serve(config_path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
             .as_ref()
             .map(|h| h.interval_secs)
             .unwrap_or(1800);
-        let hb_dir = data_dir.clone();
+        let hb_dir = data_dir.to_path_buf();
         let hb_tx = inbound_tx.clone();
         tracing::info!("Heartbeat service enabled (every {hb_interval}s)");
         tasks.push(tokio::spawn(async move {

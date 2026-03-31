@@ -11,8 +11,8 @@ use super::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 
 /// Transport-agnostic interface for sending JSON-RPC messages
 pub enum Transport {
-    Stdio(StdioTransport),
-    Http(HttpTransport),
+    Stdio(Box<StdioTransport>),
+    Http(Box<HttpTransport>),
 }
 
 impl Transport {

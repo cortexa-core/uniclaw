@@ -219,7 +219,7 @@ impl ContextBuilder {
         }
 
         // Sort by name descending (most recent first)
-        entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
         entries.truncate(count);
 
         let mut notes = Vec::new();

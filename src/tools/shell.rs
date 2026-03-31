@@ -65,7 +65,7 @@ impl Tool for ShellExecTool {
             .collect();
 
         for segment in &segments {
-            let parts: Vec<&str> = segment.trim().split_whitespace().collect();
+            let parts: Vec<&str> = segment.split_whitespace().collect();
             let program = match parts.first() {
                 Some(p) => *p,
                 None => return ToolResult::Error("Empty command segment in pipeline".into()),

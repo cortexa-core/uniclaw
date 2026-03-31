@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
@@ -48,7 +48,7 @@ impl CronJob {
     }
 }
 
-pub async fn load_cron_jobs(data_dir: &PathBuf) -> Vec<CronJob> {
+pub async fn load_cron_jobs(data_dir: &Path) -> Vec<CronJob> {
     let path = data_dir.join("cron.json");
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
@@ -56,7 +56,7 @@ pub async fn load_cron_jobs(data_dir: &PathBuf) -> Vec<CronJob> {
     }
 }
 
-pub async fn save_cron_jobs(data_dir: &PathBuf, jobs: &[CronJob]) -> Result<()> {
+pub async fn save_cron_jobs(data_dir: &Path, jobs: &[CronJob]) -> Result<()> {
     let path = data_dir.join("cron.json");
     let content = serde_json::to_string_pretty(jobs)?;
     tokio::fs::write(&path, content).await?;

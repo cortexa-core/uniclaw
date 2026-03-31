@@ -49,7 +49,7 @@ impl McpClient {
                 })?;
                 let t = super::transport::StdioTransport::spawn(command, &config.args, &config.env)
                     .await?;
-                Transport::Stdio(t)
+                Transport::Stdio(Box::new(t))
             }
             "http" => {
                 let url = config.url.as_ref().ok_or_else(|| {
@@ -58,7 +58,7 @@ impl McpClient {
                         config.name
                     )
                 })?;
-                Transport::Http(super::transport::HttpTransport::new(url)?)
+                Transport::Http(Box::new(super::transport::HttpTransport::new(url)?))
             }
             other => {
                 return Err(anyhow!(
