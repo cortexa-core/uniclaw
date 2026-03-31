@@ -1,5 +1,9 @@
 # UniClaw
 
+[![CI](https://github.com/cortexa-core/uniclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/cortexa-core/uniclaw/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cortexa-core/uniclaw)](https://github.com/cortexa-core/uniclaw/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A privacy-first AI agent for resource-constrained edge devices.
 
 UniClaw is a lightweight, self-hosted AI agent designed for Raspberry Pi, cheap ARM boards, and beyond. The agent loop runs locally — the cloud LLM is just an API it calls when it needs to think. Tools, memory, skills, and state all stay on your device.

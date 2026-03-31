@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+          - x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install zig
+        uses: goto-bus-stop/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild
+
+      - name: Build
+        run: cargo zigbuild --target ${{ matrix.target }} --release
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          ARCHIVE="uniclaw-${VERSION}-${{ matrix.target }}"
+          mkdir -p "${ARCHIVE}"/{config,data/memory,data/sessions,data/skills}
+          cp target/${{ matrix.target }}/release/uniclaw "${ARCHIVE}/"
+          cp config/default_config.toml "${ARCHIVE}/config/config.toml"
+          cp data/SOUL.md "${ARCHIVE}/data/"
+          cp data/skills/*.md "${ARCHIVE}/data/skills/"
+          tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uniclaw-${{ matrix.target }}
+          path: uniclaw-*.tar.gz
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --target ${{ matrix.target }} --release --features telegram
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          ARCHIVE="uniclaw-${VERSION}-${{ matrix.target }}"
+          mkdir -p "${ARCHIVE}"/{config,data/memory,data/sessions,data/skills}
+          cp target/${{ matrix.target }}/release/uniclaw "${ARCHIVE}/"
+          cp config/default_config.toml "${ARCHIVE}/config/config.toml"
+          cp data/SOUL.md "${ARCHIVE}/data/"
+          cp data/skills/*.md "${ARCHIVE}/data/skills/"
+          tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uniclaw-${{ matrix.target }}
+          path: uniclaw-*.tar.gz
+
+  publish:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: uniclaw-*.tar.gz
+          generate_release_notes: true

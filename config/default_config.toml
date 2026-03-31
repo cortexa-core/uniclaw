@@ -8,13 +8,19 @@ session_max_age_days = 30
 session_max_count = 100
 
 [llm]
-provider = "anthropic"
-api_key_env = "ANTHROPIC_API_KEY"
-model = "claude-sonnet-4-6"
-base_url = "https://api.anthropic.com"
+provider = "openai_compatible"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com"
 max_tokens = 1024
 temperature = 0.7
 timeout_secs = 60
+
+# To use Anthropic instead:
+# provider = "anthropic"
+# api_key_env = "ANTHROPIC_API_KEY"
+# model = "claude-sonnet-4-6"
+# base_url = "https://api.anthropic.com"
 
 # Optional fallback provider (e.g., local Ollama)
 # [llm.fallback]
