@@ -53,6 +53,13 @@ impl Tool for CronAddTool {
         };
         let name = args["name"].as_str().unwrap_or("Unnamed job").to_string();
 
+        if name.len() > 256 {
+            return ToolResult::Error("Job name too long (max 256 characters)".into());
+        }
+        if action.len() > 4096 {
+            return ToolResult::Error("Job action too long (max 4096 characters)".into());
+        }
+
         let id = uuid::Uuid::new_v4().to_string()[..8].to_string();
 
         let job = CronJob {
@@ -231,6 +238,21 @@ mod tests {
         // List should be empty now
         let result = CronListTool.execute(json!({}), &ctx).await;
         assert!(result.content().contains("No cron jobs"));
+    }
+
+    #[tokio::test]
+    async fn test_cron_add_rejects_long_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+        let long_action = "a".repeat(5000);
+        let result = CronAddTool
+            .execute(
+                json!({"name": "Big", "action": long_action, "interval_seconds": 60}),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("too long"));
     }
 
     #[tokio::test]
