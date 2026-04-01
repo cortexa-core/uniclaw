@@ -62,118 +62,121 @@ impl Channel for TelegramChannel {
         let bot_username = Arc::new(me.username.clone().unwrap_or_default());
 
         loop {
-        let bot = bot.clone();
-        let agent_tx = agent_tx.clone();
-        let allowed_users = Arc::clone(&allowed_users);
-        let respond_in_groups = Arc::clone(&respond_in_groups);
-        let bot_username = Arc::clone(&bot_username);
-
-        teloxide::repl(bot, move |bot: Bot, msg: Message| {
+            let bot = bot.clone();
             let agent_tx = agent_tx.clone();
             let allowed_users = Arc::clone(&allowed_users);
             let respond_in_groups = Arc::clone(&respond_in_groups);
             let bot_username = Arc::clone(&bot_username);
 
-            async move {
-                // Only handle text messages
-                let text = match msg.text() {
-                    Some(t) => t.to_string(),
-                    None => return Ok(()),
-                };
+            teloxide::repl(bot, move |bot: Bot, msg: Message| {
+                let agent_tx = agent_tx.clone();
+                let allowed_users = Arc::clone(&allowed_users);
+                let respond_in_groups = Arc::clone(&respond_in_groups);
+                let bot_username = Arc::clone(&bot_username);
 
-                let user_id = msg.from.as_ref().map(|u| u.id.0 as i64).unwrap_or(0);
-
-                // Check authorization
-                if !allowed_users.is_empty() && !allowed_users.contains(&user_id) {
-                    return Ok(());
-                }
-
-                // Check group policy
-                let is_group = msg.chat.is_group() || msg.chat.is_supergroup();
-                if is_group {
-                    let should_respond = match respond_in_groups.as_ref() {
-                        crate::config::GroupResponseMode::Always => true,
-                        crate::config::GroupResponseMode::Never => return Ok(()),
-                        crate::config::GroupResponseMode::Mention => {
-                            let mentioned = !bot_username.is_empty()
-                                && text.contains(&format!("@{bot_username}"));
-                            let is_reply_to_bot = msg
-                                .reply_to_message()
-                                .and_then(|r| r.from.as_ref())
-                                .map(|u| {
-                                    u.is_bot
-                                        && u.username.as_deref()
-                                            == Some(bot_username.as_str())
-                                })
-                                .unwrap_or(false);
-                            mentioned || is_reply_to_bot
-                        }
+                async move {
+                    // Only handle text messages
+                    let text = match msg.text() {
+                        Some(t) => t.to_string(),
+                        None => return Ok(()),
                     };
-                    if !should_respond {
+
+                    let user_id = msg.from.as_ref().map(|u| u.id.0 as i64).unwrap_or(0);
+
+                    // Check authorization
+                    if !allowed_users.is_empty() && !allowed_users.contains(&user_id) {
                         return Ok(());
                     }
-                }
 
-                // Strip @bot_username from the text if present
-                let clean_text = if !bot_username.is_empty() {
-                    text.replace(&format!("@{bot_username}"), "")
-                        .trim()
-                        .to_string()
-                } else {
-                    text
-                };
+                    // Check group policy
+                    let is_group = msg.chat.is_group() || msg.chat.is_supergroup();
+                    if is_group {
+                        let should_respond = match respond_in_groups.as_ref() {
+                            crate::config::GroupResponseMode::Always => true,
+                            crate::config::GroupResponseMode::Never => return Ok(()),
+                            crate::config::GroupResponseMode::Mention => {
+                                let mentioned = !bot_username.is_empty()
+                                    && text.contains(&format!("@{bot_username}"));
+                                let is_reply_to_bot = msg
+                                    .reply_to_message()
+                                    .and_then(|r| r.from.as_ref())
+                                    .map(|u| {
+                                        u.is_bot
+                                            && u.username.as_deref() == Some(bot_username.as_str())
+                                    })
+                                    .unwrap_or(false);
+                                mentioned || is_reply_to_bot
+                            }
+                        };
+                        if !should_respond {
+                            return Ok(());
+                        }
+                    }
 
-                if clean_text.is_empty() {
-                    return Ok(());
-                }
-
-                // Send typing indicator
-                bot.send_chat_action(msg.chat.id, ChatAction::Typing)
-                    .await
-                    .ok();
-
-                // Session per user
-                let session_id = format!("telegram:{user_id}");
-
-                let input = Input {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    session_id,
-                    content: clean_text,
-                };
-
-                let (reply_tx, reply_rx) = oneshot::channel::<Output>();
-
-                if agent_tx.send((input, reply_tx)).await.is_err() {
-                    bot.send_message(msg.chat.id, "Agent is unavailable. Please try again later.")
-                        .await
-                        .ok();
-                    return Ok(());
-                }
-
-                let response =
-                    match tokio::time::timeout(std::time::Duration::from_secs(120), reply_rx).await
-                    {
-                        Ok(Ok(output)) => output.content,
-                        Ok(Err(_)) => "Something went wrong. Please try again.".to_string(),
-                        Err(_) => "Request timed out. Please try again.".to_string(),
+                    // Strip @bot_username from the text if present
+                    let clean_text = if !bot_username.is_empty() {
+                        text.replace(&format!("@{bot_username}"), "")
+                            .trim()
+                            .to_string()
+                    } else {
+                        text
                     };
 
-                // Chunk and send (Telegram max 4096 chars)
-                let chunks = chunk_message(&response, 4096);
-                for (i, chunk) in chunks.iter().enumerate() {
-                    if i > 0 {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    if clean_text.is_empty() {
+                        return Ok(());
                     }
-                    bot.send_message(msg.chat.id, chunk).await.ok();
+
+                    // Send typing indicator
+                    bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+                        .await
+                        .ok();
+
+                    // Session per user
+                    let session_id = format!("telegram:{user_id}");
+
+                    let input = Input {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        session_id,
+                        content: clean_text,
+                    };
+
+                    let (reply_tx, reply_rx) = oneshot::channel::<Output>();
+
+                    if agent_tx.send((input, reply_tx)).await.is_err() {
+                        bot.send_message(
+                            msg.chat.id,
+                            "Agent is unavailable. Please try again later.",
+                        )
+                        .await
+                        .ok();
+                        return Ok(());
+                    }
+
+                    let response =
+                        match tokio::time::timeout(std::time::Duration::from_secs(120), reply_rx)
+                            .await
+                        {
+                            Ok(Ok(output)) => output.content,
+                            Ok(Err(_)) => "Something went wrong. Please try again.".to_string(),
+                            Err(_) => "Request timed out. Please try again.".to_string(),
+                        };
+
+                    // Chunk and send (Telegram max 4096 chars)
+                    let chunks = chunk_message(&response, 4096);
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        if i > 0 {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                        bot.send_message(msg.chat.id, chunk).await.ok();
+                    }
+
+                    Ok(())
                 }
+            })
+            .await;
 
-                Ok(())
-            }
-        })
-        .await;
-
-        tracing::warn!("Telegram polling ended, reconnecting in 5s...");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tracing::warn!("Telegram polling ended, reconnecting in 5s...");
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         } // end reconnection loop
     }
 }

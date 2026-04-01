@@ -103,7 +103,8 @@ impl SessionStore {
             self.sessions.insert(id.to_string(), session);
         }
         self.access_counter += 1;
-        self.access_order.insert(id.to_string(), self.access_counter);
+        self.access_order
+            .insert(id.to_string(), self.access_counter);
         self.sessions
             .get_mut(id)
             .expect("session was just inserted; this is a bug if it fails")
