@@ -132,8 +132,17 @@ pub struct TelegramConfig {
     pub bot_token_env: String,
     #[serde(default)]
     pub allowed_users: Vec<i64>,
-    #[serde(default = "default_respond_in_groups")]
-    pub respond_in_groups: String,
+    #[serde(default)]
+    pub respond_in_groups: GroupResponseMode,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum GroupResponseMode {
+    Always,
+    Never,
+    #[default]
+    Mention,
 }
 
 impl Default for LoggingConfig {
@@ -234,9 +243,6 @@ fn default_cron_interval() -> u64 {
 fn default_heartbeat_interval() -> u64 {
     1800
 }
-fn default_respond_in_groups() -> String {
-    "mention".to_string()
-}
 
 #[cfg(test)]
 mod tests {
@@ -305,6 +311,41 @@ model = "gpt-4o"
             fallback: None,
         };
         assert!(config.api_key().is_err());
+    }
+
+    #[test]
+    fn test_group_response_mode_parsing() {
+        let toml = r#"
+[agent]
+[llm]
+provider = "test"
+model = "test"
+[channels.telegram]
+bot_token_env = "TEST"
+respond_in_groups = "always"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.channels.telegram.unwrap().respond_in_groups,
+            GroupResponseMode::Always
+        );
+    }
+
+    #[test]
+    fn test_group_response_mode_default() {
+        let toml = r#"
+[agent]
+[llm]
+provider = "test"
+model = "test"
+[channels.telegram]
+bot_token_env = "TEST"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.channels.telegram.unwrap().respond_in_groups,
+            GroupResponseMode::Mention
+        );
     }
 
     #[test]

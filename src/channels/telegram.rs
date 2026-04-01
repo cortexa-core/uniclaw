@@ -13,7 +13,7 @@ use crate::config::TelegramConfig;
 pub struct TelegramChannel {
     bot_token: String,
     allowed_users: Vec<i64>,
-    respond_in_groups: String,
+    respond_in_groups: crate::config::GroupResponseMode,
 }
 
 impl TelegramChannel {
@@ -91,11 +91,10 @@ impl Channel for TelegramChannel {
                 // Check group policy
                 let is_group = msg.chat.is_group() || msg.chat.is_supergroup();
                 if is_group {
-                    let should_respond = match respond_in_groups.as_str() {
-                        "always" => true,
-                        "never" => return Ok(()),
-                        _ => {
-                            // "mention" mode
+                    let should_respond = match respond_in_groups.as_ref() {
+                        crate::config::GroupResponseMode::Always => true,
+                        crate::config::GroupResponseMode::Never => return Ok(()),
+                        crate::config::GroupResponseMode::Mention => {
                             let mentioned = !bot_username.is_empty()
                                 && text.contains(&format!("@{bot_username}"));
                             let is_reply_to_bot = msg
