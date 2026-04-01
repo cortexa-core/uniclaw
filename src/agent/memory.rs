@@ -65,8 +65,8 @@ impl Session {
     }
 
     /// Return messages formatted for LLM context
-    pub fn messages_for_context(&self) -> Vec<Message> {
-        self.messages.clone()
+    pub fn messages_for_context(&self) -> &[Message] {
+        &self.messages
     }
 }
 
@@ -229,11 +229,18 @@ impl SessionStore {
             })
             .collect();
 
+        let file_time = tokio::fs::metadata(&path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(DateTime::<Utc>::from)
+            .unwrap_or_else(Utc::now);
+
         Ok(Session {
             id: id.to_string(),
             messages,
-            created_at: Utc::now(), // approximate — could parse from file metadata
-            updated_at: Utc::now(),
+            created_at: file_time,
+            updated_at: file_time,
             needs_consolidation: false,
         })
     }

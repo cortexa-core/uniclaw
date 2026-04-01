@@ -105,7 +105,7 @@ impl ContextBuilder {
             .prompt
             .clone();
 
-        let messages = session.messages_for_context();
+        let messages = session.messages_for_context().to_vec();
 
         Ok(Context {
             system,
