@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
@@ -78,14 +78,6 @@ fn default_session() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-#[derive(Serialize)]
-struct StatusResponse {
-    version: String,
-    model: String,
-    uptime_secs: u64,
-    status: String,
-}
-
 // --- Handlers ---
 
 async fn chat_handler(
@@ -134,11 +126,28 @@ async fn chat_handler(
     }
 }
 
-async fn status_handler(State(state): State<Arc<HttpState>>) -> Json<StatusResponse> {
-    Json(StatusResponse {
-        version: state.version.clone(),
-        model: state.model.clone(),
-        uptime_secs: state.start_time.elapsed().as_secs(),
-        status: "running".into(),
-    })
+async fn status_handler(
+    State(state): State<Arc<HttpState>>,
+    req: axum::extract::Request,
+) -> Json<serde_json::Value> {
+    let is_authenticated = if state.api_token.is_empty() {
+        true
+    } else {
+        req.headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "))
+            == Some(&state.api_token)
+    };
+
+    if is_authenticated {
+        Json(serde_json::json!({
+            "status": "running",
+            "version": state.version,
+            "model": state.model,
+            "uptime_secs": state.start_time.elapsed().as_secs(),
+        }))
+    } else {
+        Json(serde_json::json!({"status": "ok"}))
+    }
 }
