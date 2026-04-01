@@ -64,6 +64,14 @@ impl Tool for ShellExecTool {
             .map(|s| s.as_str())
             .collect();
 
+        if allowed.is_empty() {
+            return ToolResult::Error(
+                "No commands are allowed: shell_allowed_commands is empty in config.".into(),
+            );
+        }
+
+        let data_dir_str = ctx.data_dir.to_string_lossy();
+
         for segment in &segments {
             let parts: Vec<&str> = segment.split_whitespace().collect();
             let program = match parts.first() {
@@ -71,11 +79,21 @@ impl Tool for ShellExecTool {
                 None => return ToolResult::Error("Empty command segment in pipeline".into()),
             };
 
-            if !allowed.is_empty() && !allowed.contains(program) {
+            if !allowed.contains(program) {
                 return ToolResult::Error(format!(
                     "Command '{program}' is not in the allowed list. Allowed: {}",
                     ctx.config.tools.shell_allowed_commands.join(", ")
                 ));
+            }
+
+            // Reject absolute path arguments that escape the data directory
+            for arg in &parts[1..] {
+                if arg.starts_with('/') && !arg.starts_with(data_dir_str.as_ref()) {
+                    return ToolResult::Error(format!(
+                        "Argument '{arg}' references an absolute path outside the data directory. \
+                         Use relative paths or paths within the data directory."
+                    ));
+                }
             }
         }
 
@@ -156,7 +174,7 @@ mod tests {
 provider = "test"
 model = "test"
 [tools]
-shell_allowed_commands = ["echo", "date", "ls"]
+shell_allowed_commands = ["echo", "date", "ls", "cat"]
 shell_timeout_secs = 5
 "#,
         )
@@ -210,5 +228,54 @@ shell_timeout_secs = 5
             .await;
         assert!(result.is_error());
         assert!(result.content().contains("disallowed characters"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_empty_whitelist_denies() {
+        let dir = tempfile::tempdir().unwrap();
+        let config: Config = toml::from_str(
+            r#"
+[agent]
+[llm]
+provider = "test"
+model = "test"
+[tools]
+shell_allowed_commands = []
+"#,
+        )
+        .unwrap();
+        let ctx = ToolContext {
+            data_dir: dir.path().to_path_buf(),
+            session_id: "test".into(),
+            config: Arc::new(config),
+        };
+        let result = ShellExecTool
+            .execute(json!({"command": "echo hello"}), &ctx)
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("shell_allowed_commands is empty"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_rejects_absolute_path_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+        let result = ShellExecTool
+            .execute(json!({"command": "cat /etc/passwd"}), &ctx)
+            .await;
+        assert!(result.is_error());
+        assert!(result.content().contains("absolute path outside"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_allows_relative_path_args() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("test.txt"), "hello").unwrap();
+        let ctx = test_ctx(dir.path());
+        let result = ShellExecTool
+            .execute(json!({"command": "cat test.txt"}), &ctx)
+            .await;
+        assert!(!result.is_error());
+        assert!(result.content().contains("hello"));
     }
 }
