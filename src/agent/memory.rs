@@ -508,6 +508,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LlmProvider for MockConsolidationLlm {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
         async fn chat(&self, _context: &Context) -> Result<ChatResponse> {
             Ok(ChatResponse {
                 text: Some(self.response_text.clone()),

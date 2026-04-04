@@ -144,6 +144,66 @@ pub struct Usage {
     pub output_tokens: u32,
 }
 
+/// Classified LLM error for retry/failover decisions.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LlmErrorKind {
+    RateLimited,
+    ContextTooLong,
+    AuthFailed,
+    ModelNotFound,
+    ServerError,
+    Timeout,
+    Other,
+}
+
+impl LlmErrorKind {
+    pub fn classify(status: Option<u16>, body: &str) -> Self {
+        let lower = body.to_lowercase();
+        if let Some(code) = status {
+            match code {
+                429 => return Self::RateLimited,
+                413 => return Self::ContextTooLong,
+                401 | 403 => return Self::AuthFailed,
+                404 => return Self::ModelNotFound,
+                408 => return Self::Timeout,
+                500..=599 => return Self::ServerError,
+                _ => {}
+            }
+        }
+        if lower.contains("rate limit")
+            || lower.contains("rate_limit")
+            || lower.contains("too many requests")
+            || lower.contains("quota exceeded")
+        {
+            return Self::RateLimited;
+        }
+        if lower.contains("context length")
+            || lower.contains("context window")
+            || lower.contains("too many tokens")
+            || lower.contains("prompt is too long")
+        {
+            return Self::ContextTooLong;
+        }
+        if lower.contains("invalid api key")
+            || lower.contains("unauthorized")
+            || lower.contains("authentication")
+        {
+            return Self::AuthFailed;
+        }
+        if lower.contains("model not found")
+            || lower.contains("does not exist")
+            || lower.contains("model_not_found")
+        {
+            return Self::ModelNotFound;
+        }
+        Self::Other
+    }
+
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::RateLimited | Self::ServerError | Self::Timeout)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +254,67 @@ mod tests {
         assert!(ctx.system.is_empty());
         assert_eq!(ctx.messages.len(), 1);
         assert_eq!(ctx.messages[0].content_text(), "Summarize this");
+    }
+
+    #[test]
+    fn test_error_classify_status_codes() {
+        assert_eq!(
+            LlmErrorKind::classify(Some(429), ""),
+            LlmErrorKind::RateLimited
+        );
+        assert_eq!(
+            LlmErrorKind::classify(Some(413), ""),
+            LlmErrorKind::ContextTooLong
+        );
+        assert_eq!(
+            LlmErrorKind::classify(Some(401), ""),
+            LlmErrorKind::AuthFailed
+        );
+        assert_eq!(
+            LlmErrorKind::classify(Some(404), ""),
+            LlmErrorKind::ModelNotFound
+        );
+        assert_eq!(
+            LlmErrorKind::classify(Some(500), ""),
+            LlmErrorKind::ServerError
+        );
+        assert_eq!(
+            LlmErrorKind::classify(Some(503), ""),
+            LlmErrorKind::ServerError
+        );
+        assert_eq!(
+            LlmErrorKind::classify(Some(200), "ok"),
+            LlmErrorKind::Other
+        );
+    }
+
+    #[test]
+    fn test_error_classify_body_patterns() {
+        assert_eq!(
+            LlmErrorKind::classify(None, "Rate limit exceeded"),
+            LlmErrorKind::RateLimited
+        );
+        assert_eq!(
+            LlmErrorKind::classify(None, "maximum context length exceeded"),
+            LlmErrorKind::ContextTooLong
+        );
+        assert_eq!(
+            LlmErrorKind::classify(None, "Invalid API key provided"),
+            LlmErrorKind::AuthFailed
+        );
+        assert_eq!(
+            LlmErrorKind::classify(None, "The model gpt-5 does not exist"),
+            LlmErrorKind::ModelNotFound
+        );
+    }
+
+    #[test]
+    fn test_error_retryable() {
+        assert!(LlmErrorKind::RateLimited.is_retryable());
+        assert!(LlmErrorKind::ServerError.is_retryable());
+        assert!(LlmErrorKind::Timeout.is_retryable());
+        assert!(!LlmErrorKind::AuthFailed.is_retryable());
+        assert!(!LlmErrorKind::ModelNotFound.is_retryable());
+        assert!(!LlmErrorKind::ContextTooLong.is_retryable());
     }
 }

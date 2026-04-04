@@ -11,6 +11,13 @@ use types::{ChatResponse, Context};
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     async fn chat(&self, context: &Context) -> Result<ChatResponse>;
+    fn name(&self) -> &str;
+    fn supports_native_tools(&self) -> bool {
+        true
+    }
+    fn supports_vision(&self) -> bool {
+        false
+    }
 }
 
 pub fn create_provider(config: &LlmConfig) -> Result<Box<dyn LlmProvider>> {

@@ -122,6 +122,10 @@ impl MockLlmClient {
 
 #[async_trait]
 impl LlmProvider for MockLlmClient {
+    fn name(&self) -> &str {
+        "mock"
+    }
+
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
         self.recorded_contexts
             .lock()

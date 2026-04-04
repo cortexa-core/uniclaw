@@ -163,6 +163,10 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
         let body = self.serialize_request(context);
         let url = format!("{}/v1/messages", self.base_url);

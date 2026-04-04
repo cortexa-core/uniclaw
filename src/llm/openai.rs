@@ -163,6 +163,10 @@ impl OpenAiProvider {
 
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
+    fn name(&self) -> &str {
+        "openai_compatible"
+    }
+
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
         let body = self.serialize_request(context);
         let url = format!("{}/v1/chat/completions", self.base_url);
