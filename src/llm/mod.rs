@@ -3,6 +3,7 @@ pub mod anthropic;
 pub mod gemini;
 pub mod openai;
 pub mod reliable;
+pub mod router;
 pub mod types;
 
 use anyhow::{anyhow, Result};
