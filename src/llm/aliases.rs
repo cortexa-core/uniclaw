@@ -12,6 +12,7 @@ pub enum AuthStyle {
 pub struct ProviderAlias {
     pub backend: &'static str,
     pub base_url: &'static str,
+    #[allow(dead_code)]
     pub api_key_env: &'static str,
     pub auth_style: AuthStyle,
     pub extra_headers: &'static [(&'static str, &'static str)],
@@ -155,6 +156,7 @@ pub fn resolve(name: &str) -> Option<ProviderAlias> {
 }
 
 /// All recognized alias strings.
+#[allow(dead_code)]
 pub fn all_aliases() -> &'static [&'static str] {
     &[
         // Native

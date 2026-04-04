@@ -16,9 +16,11 @@ use types::{ChatResponse, Context};
 pub trait LlmProvider: Send + Sync {
     async fn chat(&self, context: &Context) -> Result<ChatResponse>;
     fn name(&self) -> &str;
+    #[allow(dead_code)]
     fn supports_native_tools(&self) -> bool {
         true
     }
+    #[allow(dead_code)]
     fn supports_vision(&self) -> bool {
         false
     }

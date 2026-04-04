@@ -22,12 +22,14 @@ impl std::fmt::Debug for RouterProvider {
     }
 }
 
+#[allow(dead_code)]
 pub struct RouterProvider {
     providers: HashMap<String, Box<dyn LlmProvider>>,
     routes: HashMap<String, (String, String)>, // hint → (provider_name, model)
     default_name: String,
 }
 
+#[allow(dead_code)]
 impl RouterProvider {
     pub fn new(
         providers: HashMap<String, Box<dyn LlmProvider>>,
