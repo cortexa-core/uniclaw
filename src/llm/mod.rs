@@ -6,7 +6,7 @@ pub mod reliable;
 pub mod router;
 pub mod types;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::config::LlmConfig;
@@ -25,12 +25,23 @@ pub trait LlmProvider: Send + Sync {
 }
 
 pub fn create_provider(config: &LlmConfig) -> Result<Box<dyn LlmProvider>> {
-    match config.provider.as_str() {
+    let alias = aliases::resolve(&config.provider);
+    let backend = alias
+        .as_ref()
+        .map(|a| a.backend)
+        .unwrap_or(config.provider.as_str());
+
+    match backend {
         "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(config)?)),
-        "openai_compatible" | "openai" => Ok(Box::new(openai::OpenAiProvider::new(config)?)),
         "gemini" => Ok(Box::new(gemini::GeminiProvider::new(config)?)),
-        other => Err(anyhow!(
-            "Unknown LLM provider: {other}. Use 'anthropic', 'gemini', or 'openai_compatible'."
-        )),
+        "openai_compatible" | "openai" => Ok(Box::new(openai::OpenAiProvider::new(config)?)),
+        _ => {
+            // Unknown backend — try as OpenAI-compatible
+            tracing::info!(
+                "Unknown provider '{}', trying as OpenAI-compatible",
+                config.provider
+            );
+            Ok(Box::new(openai::OpenAiProvider::new(config)?))
+        }
     }
 }

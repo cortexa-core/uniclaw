@@ -12,7 +12,6 @@ use super::memory::{MemoryManager, SessionStore};
 
 pub struct Agent {
     llm: Box<dyn LlmProvider>,
-    fallback_llm: Option<Box<dyn LlmProvider>>,
     pub tool_registry: ToolRegistry,
     pub memory: MemoryManager,
     pub session_store: SessionStore,
@@ -88,7 +87,6 @@ fn validate_session_id(id: &str) -> Result<()> {
 impl Agent {
     pub async fn new(
         llm: Box<dyn LlmProvider>,
-        fallback_llm: Option<Box<dyn LlmProvider>>,
         tool_registry: ToolRegistry,
         config: &Config,
         data_dir: PathBuf,
@@ -113,7 +111,6 @@ impl Agent {
 
         Self {
             llm,
-            fallback_llm,
             tool_registry,
             memory: MemoryManager::new(data_dir.clone()),
             session_store: SessionStore::new(data_dir.clone(), config.agent.session_max_count),
@@ -200,8 +197,8 @@ impl Agent {
                 self.context_builder.build(session, &tool_schemas).await?
             };
 
-            // Call LLM with failover
-            let response = self.call_llm(&context).await?;
+            // Call LLM (ReliableProvider handles retry + failover)
+            let response = self.llm.chat(&context).await?;
             total_usage.input_tokens += response.usage.input_tokens;
             total_usage.output_tokens += response.usage.output_tokens;
 
@@ -273,24 +270,6 @@ impl Agent {
         Ok(Output::with_usage(msg, total_usage))
     }
 
-    async fn call_llm(&self, context: &Context) -> Result<ChatResponse> {
-        match self.llm.chat(context).await {
-            Ok(response) => Ok(response),
-            Err(primary_err) => {
-                tracing::warn!("Primary LLM failed: {primary_err}");
-                if let Some(fallback) = &self.fallback_llm {
-                    tracing::info!("Trying fallback LLM provider...");
-                    fallback.chat(context).await.map_err(|fallback_err| {
-                        anyhow!(
-                            "All LLM providers failed.\n  Primary: {primary_err}\n  Fallback: {fallback_err}"
-                        )
-                    })
-                } else {
-                    Err(primary_err)
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

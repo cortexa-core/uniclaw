@@ -95,6 +95,10 @@ pub struct LlmConfig {
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
     pub fallback: Option<Box<LlmConfig>>,
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    #[serde(default = "default_backoff")]
+    pub base_backoff_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize, Default)]
@@ -243,6 +247,12 @@ fn default_cron_interval() -> u64 {
 fn default_heartbeat_interval() -> u64 {
     1800
 }
+fn default_max_retries() -> u32 {
+    2
+}
+fn default_backoff() -> u64 {
+    200
+}
 
 #[cfg(test)]
 mod tests {
@@ -293,6 +303,8 @@ model = "gpt-4o"
             temperature: 0.7,
             timeout_secs: 60,
             fallback: None,
+            max_retries: 2,
+            base_backoff_ms: 200,
         };
         assert_eq!(config.api_key().unwrap(), "sk-test-123");
         std::env::remove_var("UNICLAW_TEST_KEY");
@@ -309,6 +321,8 @@ model = "gpt-4o"
             temperature: 0.7,
             timeout_secs: 60,
             fallback: None,
+            max_retries: 2,
+            base_backoff_ms: 200,
         };
         assert!(config.api_key().is_err());
     }
@@ -359,6 +373,8 @@ bot_token_env = "TEST"
             temperature: 0.7,
             timeout_secs: 60,
             fallback: None,
+            max_retries: 2,
+            base_backoff_ms: 200,
         };
         assert_eq!(config.api_key().unwrap(), "");
     }

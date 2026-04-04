@@ -126,11 +126,18 @@ async fn create_agent(config: &Config, data_dir: &Path) -> Result<Agent> {
     std::fs::create_dir_all(data_dir.join("skills"))?;
 
     let primary = llm::create_provider(&config.llm)?;
-    let fallback = config
-        .llm
-        .fallback
-        .as_ref()
-        .and_then(|f| llm::create_provider(f).ok());
+
+    let mut fallbacks: Vec<Box<dyn llm::LlmProvider>> = Vec::new();
+    if let Some(ref fallback_config) = config.llm.fallback {
+        fallbacks.push(llm::create_provider(fallback_config)?);
+    }
+
+    let llm: Box<dyn llm::LlmProvider> = Box::new(llm::reliable::ReliableProvider::new(
+        primary,
+        fallbacks,
+        config.llm.max_retries,
+        config.llm.base_backoff_ms,
+    ));
 
     let mut tool_registry = tools::registry::ToolRegistry::new();
     tools::register_default_tools(&mut tool_registry);
@@ -141,14 +148,7 @@ async fn create_agent(config: &Config, data_dir: &Path) -> Result<Agent> {
         // Note: clients are kept alive by the Arc<McpClient> inside each McpTool
     }
 
-    let mut agent = Agent::new(
-        primary,
-        fallback,
-        tool_registry,
-        config,
-        data_dir.to_path_buf(),
-    )
-    .await;
+    let mut agent = Agent::new(llm, tool_registry, config, data_dir.to_path_buf()).await;
 
     // Run session GC at startup — remove expired and excess session files
     if let Err(e) = agent.cleanup_sessions().await {

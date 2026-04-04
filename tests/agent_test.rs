@@ -8,6 +8,7 @@ use serde_json::json;
 // We need to access internal modules — use the crate directly
 use uniclaw::agent::{Agent, Input};
 use uniclaw::config::Config;
+use uniclaw::llm::reliable::ReliableProvider;
 use uniclaw::llm::types::*;
 use uniclaw::llm::LlmProvider;
 use uniclaw::tools;
@@ -177,7 +178,6 @@ async fn make_agent(mock: MockLlmClient, data_dir: &std::path::Path) -> Agent {
 
     Agent::new(
         Box::new(mock),
-        None,
         registry,
         &test_config(),
         data_dir.to_path_buf(),
@@ -248,12 +248,18 @@ async fn test_llm_failover() {
     let primary = MockLlmClient::failing();
     let fallback = MockLlmClient::text("Fallback response!");
 
+    let llm: Box<dyn LlmProvider> = Box::new(ReliableProvider::new(
+        Box::new(primary),
+        vec![Box::new(fallback)],
+        1, // single attempt before failover
+        10,
+    ));
+
     let mut registry = ToolRegistry::new();
     tools::register_default_tools(&mut registry);
 
     let mut agent = Agent::new(
-        Box::new(primary),
-        Some(Box::new(fallback)),
+        llm,
         registry,
         &test_config(),
         dir.path().to_path_buf(),
@@ -274,12 +280,18 @@ async fn test_llm_all_fail() {
     let primary = MockLlmClient::failing();
     let fallback = MockLlmClient::failing();
 
+    let llm: Box<dyn LlmProvider> = Box::new(ReliableProvider::new(
+        Box::new(primary),
+        vec![Box::new(fallback)],
+        1,
+        10,
+    ));
+
     let mut registry = ToolRegistry::new();
     tools::register_default_tools(&mut registry);
 
     let mut agent = Agent::new(
-        Box::new(primary),
-        Some(Box::new(fallback)),
+        llm,
         registry,
         &test_config(),
         dir.path().to_path_buf(),
@@ -291,7 +303,7 @@ async fn test_llm_all_fail() {
     assert!(result
         .unwrap_err()
         .to_string()
-        .contains("All LLM providers failed"));
+        .contains("All providers failed"));
 }
 
 #[tokio::test]
