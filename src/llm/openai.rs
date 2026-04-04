@@ -14,20 +14,58 @@ pub struct OpenAiProvider {
     model: String,
     max_tokens: u32,
     temperature: f32,
+    auth_style: crate::llm::aliases::AuthStyle,
+    extra_headers: Vec<(String, String)>,
+    provider_name: String,
 }
 
 impl OpenAiProvider {
     pub fn new(config: &LlmConfig) -> Result<Self> {
+        use crate::llm::aliases;
+
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
             .build()?;
+
+        let alias = aliases::resolve(&config.provider);
+
+        let auth_style = alias
+            .as_ref()
+            .map(|a| a.auth_style)
+            .unwrap_or(aliases::AuthStyle::Bearer);
+
+        let extra_headers: Vec<(String, String)> = alias
+            .as_ref()
+            .map(|a| {
+                a.extra_headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Use alias base_url if config has the default or is empty
+        let base_url = if config.base_url.is_empty()
+            || config.base_url == "https://api.anthropic.com"
+        {
+            alias
+                .as_ref()
+                .map(|a| a.base_url.to_string())
+                .unwrap_or_else(|| config.base_url.clone())
+        } else {
+            config.base_url.clone()
+        };
+
         Ok(Self {
             client,
             api_key: config.api_key()?,
-            base_url: config.base_url.trim_end_matches('/').to_string(),
+            base_url: base_url.trim_end_matches('/').to_string(),
             model: config.model.clone(),
             max_tokens: config.max_tokens,
             temperature: config.temperature,
+            auth_style,
+            extra_headers,
+            provider_name: config.provider.clone(),
         })
     }
 
@@ -164,10 +202,12 @@ impl OpenAiProvider {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     fn name(&self) -> &str {
-        "openai_compatible"
+        &self.provider_name
     }
 
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
+        use crate::llm::aliases::AuthStyle;
+
         let body = self.serialize_request(context);
         let url = format!("{}/v1/chat/completions", self.base_url);
 
@@ -178,8 +218,19 @@ impl LlmProvider for OpenAiProvider {
             .post(&url)
             .header("content-type", "application/json");
 
-        if !self.api_key.is_empty() {
-            request = request.bearer_auth(&self.api_key);
+        match self.auth_style {
+            AuthStyle::Bearer => {
+                if !self.api_key.is_empty() {
+                    request = request.bearer_auth(&self.api_key);
+                }
+            }
+            AuthStyle::XApiKey => {
+                request = request.header("x-api-key", &self.api_key);
+            }
+            AuthStyle::None | AuthStyle::QueryParam => {}
+        }
+        for (key, value) in &self.extra_headers {
+            request = request.header(key.as_str(), value.as_str());
         }
 
         let response = request.json(&body).send().await?;
@@ -209,6 +260,9 @@ mod tests {
             model: "gpt-4o".into(),
             max_tokens: 1024,
             temperature: 0.7,
+            auth_style: crate::llm::aliases::AuthStyle::Bearer,
+            extra_headers: vec![],
+            provider_name: "openai".into(),
         }
     }
 
