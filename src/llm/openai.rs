@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -204,6 +205,10 @@ impl LlmProvider for OpenAiProvider {
         &self.provider_name
     }
 
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
         use crate::llm::aliases::AuthStyle;
 
@@ -244,6 +249,178 @@ impl LlmProvider for OpenAiProvider {
         }
 
         self.parse_response(&response_body)
+    }
+
+    async fn chat_streaming(
+        &self,
+        context: &Context,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        use crate::llm::aliases::AuthStyle;
+
+        let mut body = self.serialize_request(context);
+        body["stream"] = json!(true);
+        // Request usage info in the final streaming chunk
+        body["stream_options"] = json!({"include_usage": true});
+
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        tracing::debug!("OpenAI-compatible streaming request to {url}");
+
+        let mut request = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json");
+
+        match self.auth_style {
+            AuthStyle::Bearer => {
+                if !self.api_key.is_empty() {
+                    request = request.bearer_auth(&self.api_key);
+                }
+            }
+            AuthStyle::XApiKey => {
+                request = request.header("x-api-key", &self.api_key);
+            }
+            AuthStyle::None | AuthStyle::QueryParam => {}
+        }
+        for (key, value) in &self.extra_headers {
+            request = request.header(key.as_str(), value.as_str());
+        }
+
+        let response = request.json(&body).send().await?;
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_body: Value = response.json().await?;
+            let error_msg = error_body["error"]["message"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(anyhow!("OpenAI API error ({}): {}", status, error_msg));
+        }
+
+        // State for accumulating the streamed response
+        let mut full_text = String::new();
+        // Tool calls: indexed by position. Each entry: (id, name, arguments_string)
+        let mut tool_call_parts: Vec<(String, String, String)> = Vec::new();
+        let mut usage = Usage::default();
+        let mut finish_reason: Option<String> = None;
+        let mut buffer = String::new();
+
+        let mut stream = response.bytes_stream();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete lines
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+
+                let Some(data) = line.strip_prefix("data: ") else {
+                    continue;
+                };
+
+                if data == "[DONE]" {
+                    break;
+                }
+
+                let parsed: Value = match serde_json::from_str(data) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("Failed to parse OpenAI SSE chunk: {e}");
+                        continue;
+                    }
+                };
+
+                // Extract finish_reason
+                if let Some(reason) = parsed["choices"][0]["finish_reason"].as_str() {
+                    finish_reason = Some(reason.to_string());
+                }
+
+                // Extract text delta
+                if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
+                    if !content.is_empty() {
+                        full_text.push_str(content);
+                        let _ = tx.send(content.to_string()).await;
+                    }
+                }
+
+                // Extract tool call deltas
+                if let Some(tc_deltas) = parsed["choices"][0]["delta"]["tool_calls"].as_array() {
+                    for tc_delta in tc_deltas {
+                        let index = tc_delta["index"].as_u64().unwrap_or(0) as usize;
+
+                        // Grow the vec if needed
+                        while tool_call_parts.len() <= index {
+                            tool_call_parts.push((String::new(), String::new(), String::new()));
+                        }
+
+                        if let Some(id) = tc_delta["id"].as_str() {
+                            tool_call_parts[index].0 = id.to_string();
+                        }
+                        if let Some(name) = tc_delta["function"]["name"].as_str() {
+                            tool_call_parts[index].1 = name.to_string();
+                        }
+                        if let Some(args) = tc_delta["function"]["arguments"].as_str() {
+                            tool_call_parts[index].2.push_str(args);
+                        }
+                    }
+                }
+
+                // Extract usage from final chunk
+                if let Some(u) = parsed.get("usage") {
+                    if !u.is_null() {
+                        usage.input_tokens =
+                            u["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+                        usage.output_tokens =
+                            u["completion_tokens"].as_u64().unwrap_or(0) as u32;
+                    }
+                }
+            }
+        }
+
+        // Build tool calls from accumulated parts
+        let tool_calls: Vec<ToolCall> = tool_call_parts
+            .into_iter()
+            .filter(|(_, name, _)| !name.is_empty())
+            .map(|(id, name, args_str)| {
+                let arguments: serde_json::Value =
+                    serde_json::from_str(&args_str).unwrap_or(json!({}));
+                ToolCall {
+                    id,
+                    name,
+                    arguments,
+                }
+            })
+            .collect();
+
+        let stop_reason = match finish_reason.as_deref() {
+            Some("tool_calls") => StopReason::ToolUse,
+            Some("length") => StopReason::MaxTokens,
+            _ => {
+                if tool_calls.is_empty() {
+                    StopReason::EndTurn
+                } else {
+                    StopReason::ToolUse
+                }
+            }
+        };
+
+        let text = if full_text.is_empty() {
+            None
+        } else {
+            Some(full_text)
+        };
+
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            stop_reason,
+            usage,
+        })
     }
 }
 
