@@ -46,6 +46,7 @@ pub async fn heartbeat_task(
                 "Check your HEARTBEAT.md for pending tasks and handle them. \
                  Mark completed tasks with [x].\n\n{content}"
             ),
+            stream_tx: None,
         };
 
         let (reply_tx, reply_rx) = oneshot::channel();

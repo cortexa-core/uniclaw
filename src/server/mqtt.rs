@@ -102,6 +102,7 @@ pub async fn mqtt_task(
                     id: uuid::Uuid::new_v4().to_string(),
                     session_id,
                     content: mqtt_msg.content,
+                    stream_tx: None,
                 };
 
                 let (reply_tx, reply_rx) = oneshot::channel();

@@ -123,6 +123,7 @@ async fn chat_handler(
         id: uuid::Uuid::new_v4().to_string(),
         session_id: req.session_id.clone(),
         content: req.message,
+        stream_tx: None,
     };
 
     let (reply_tx, reply_rx) = oneshot::channel();

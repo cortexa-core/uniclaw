@@ -95,6 +95,7 @@ pub async fn cron_task(
                     "Execute this scheduled task: {}\n\nTask name: {}",
                     job.action, job.name
                 ),
+                stream_tx: None,
             };
 
             let (reply_tx, reply_rx) = oneshot::channel();

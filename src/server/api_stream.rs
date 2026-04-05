@@ -34,6 +34,7 @@ pub async fn stream_chat(
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.clone(),
             content: req.message.clone(),
+            stream_tx: None,
         };
 
         let (reply_tx, reply_rx) = oneshot::channel::<Output>();

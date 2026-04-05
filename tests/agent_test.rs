@@ -166,6 +166,7 @@ fn test_input(msg: &str) -> Input {
         id: "test-id".into(),
         session_id: "test-session".into(),
         content: msg.to_string(),
+        stream_tx: None,
     }
 }
 
@@ -446,6 +447,7 @@ async fn test_session_persists_across_calls() {
         id: "req-1".into(),
         session_id: "persist-test".into(),
         content: "Hello".into(),
+        stream_tx: None,
     };
     let output1 = agent.process(&input1).await.unwrap();
     assert!(
@@ -459,6 +461,7 @@ async fn test_session_persists_across_calls() {
         id: "req-2".into(),
         session_id: "persist-test".into(),
         content: "Remember me?".into(),
+        stream_tx: None,
     };
     let output2 = agent.process(&input2).await.unwrap();
     assert!(
@@ -565,6 +568,7 @@ async fn test_consolidation_triggers_at_threshold() {
             id: format!("req-{i}"),
             session_id: session_id.into(),
             content: format!("Message {i}"),
+            stream_tx: None,
         };
         agent.process(&input).await.unwrap();
     }
@@ -586,6 +590,7 @@ async fn test_consolidation_triggers_at_threshold() {
         id: "req-trigger".into(),
         session_id: session_id.into(),
         content: "Trigger consolidation".into(),
+        stream_tx: None,
     };
     agent.process(&trigger_input).await.unwrap();
 

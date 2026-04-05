@@ -24,6 +24,26 @@ pub trait LlmProvider: Send + Sync {
     fn supports_vision(&self) -> bool {
         false
     }
+
+    /// Streaming variant: sends text chunks through tx as they arrive,
+    /// then returns the complete ChatResponse for tool parsing.
+    /// Default implementation calls chat() and sends the full text at once.
+    async fn chat_streaming(
+        &self,
+        context: &Context,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        let response = self.chat(context).await?;
+        if let Some(ref text) = response.text {
+            let _ = tx.send(text.clone()).await;
+        }
+        Ok(response)
+    }
+
+    #[allow(dead_code)]
+    fn supports_streaming(&self) -> bool {
+        false
+    }
 }
 
 pub fn create_provider(config: &LlmConfig) -> Result<Box<dyn LlmProvider>> {

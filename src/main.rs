@@ -471,6 +471,7 @@ async fn send_and_wait(
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),
         content: message.to_string(),
+        stream_tx: None,
     };
     let (reply_tx, reply_rx) = oneshot::channel();
     tx.send((input, reply_tx))

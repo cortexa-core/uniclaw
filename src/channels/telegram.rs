@@ -138,6 +138,7 @@ impl Channel for TelegramChannel {
                         id: uuid::Uuid::new_v4().to_string(),
                         session_id,
                         content: clean_text,
+                        stream_tx: None,
                     };
 
                     let (reply_tx, reply_rx) = oneshot::channel::<Output>();

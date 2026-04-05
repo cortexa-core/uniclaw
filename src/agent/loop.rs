@@ -35,6 +35,8 @@ pub struct Input {
     pub id: String,
     pub session_id: String,
     pub content: String,
+    /// Optional channel for streaming text chunks to the client.
+    pub stream_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 /// Output from the agent.
@@ -204,7 +206,11 @@ impl Agent {
             };
 
             // Call LLM (ReliableProvider handles retry + failover)
-            let response = self.llm.chat(&context).await?;
+            let response = if let Some(ref tx) = input.stream_tx {
+                self.llm.chat_streaming(&context, tx.clone()).await?
+            } else {
+                self.llm.chat(&context).await?
+            };
             total_usage.input_tokens += response.usage.input_tokens;
             total_usage.output_tokens += response.usage.output_tokens;
 
