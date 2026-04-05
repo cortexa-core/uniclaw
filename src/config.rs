@@ -46,6 +46,8 @@ pub struct ServerConfig {
     /// Env var name containing the bearer token for HTTP API auth (empty = no auth)
     #[serde(default)]
     pub api_token_env: String,
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit_per_minute: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -298,6 +300,9 @@ fn default_cron_interval() -> u64 {
 }
 fn default_heartbeat_interval() -> u64 {
     1800
+}
+fn default_rate_limit() -> u32 {
+    60
 }
 fn default_context_soul_max() -> usize {
     4096

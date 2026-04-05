@@ -22,10 +22,14 @@ pub struct HttpState {
     pub config_path: std::path::PathBuf,
     pub data_dir: std::path::PathBuf,
     pub api_token: String,
+    pub rate_limiter: Arc<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
+    pub rate_limit_per_minute: u32,
 }
 
 pub fn router(state: Arc<HttpState>) -> Router {
     let api_token = state.api_token.clone();
+    let rate_limiter = state.rate_limiter.clone();
+    let rate_limit_per_minute = state.rate_limit_per_minute;
 
     Router::new()
         .route("/api/chat", post(chat_handler))
@@ -40,9 +44,40 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .layer(middleware::from_fn(
             move |req: axum::extract::Request, next: middleware::Next| {
                 let token = api_token.clone();
+                let limiter = rate_limiter.clone();
+                let limit = rate_limit_per_minute;
                 async move {
                     // Skip auth for non-API routes (static files, SPA fallback)
-                    if !req.uri().path().starts_with("/api/") || token.is_empty() {
+                    if !req.uri().path().starts_with("/api/") {
+                        return Ok(next.run(req).await);
+                    }
+
+                    // Rate limiting
+                    if limit > 0 {
+                        let client_id = req
+                            .headers()
+                            .get("x-forwarded-for")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("unknown")
+                            .to_string();
+
+                        let mut guard = limiter.lock().unwrap();
+                        let entry = guard
+                            .entry(client_id)
+                            .or_insert((std::time::Instant::now(), 0));
+
+                        if entry.0.elapsed() > std::time::Duration::from_secs(60) {
+                            *entry = (std::time::Instant::now(), 1);
+                        } else {
+                            entry.1 += 1;
+                            if entry.1 > limit {
+                                return Err(StatusCode::TOO_MANY_REQUESTS);
+                            }
+                        }
+                    }
+
+                    // Skip auth if no token configured
+                    if token.is_empty() {
                         return Ok(next.run(req).await);
                     }
                     // Allow GET /api/status without auth (health check)

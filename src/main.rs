@@ -345,6 +345,8 @@ async fn run_serve(config_path: &Path, data_dir: &Path) -> Result<()> {
             config_path: config_path.to_path_buf(),
             data_dir: data_dir.to_path_buf(),
             api_token,
+            rate_limiter: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            rate_limit_per_minute: config.server.as_ref().map(|s| s.rate_limit_per_minute).unwrap_or(60),
         });
 
         let port = config.server.as_ref().map(|s| s.http_port).unwrap_or(3000);
