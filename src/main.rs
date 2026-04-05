@@ -132,12 +132,53 @@ async fn create_agent(config: &Config, data_dir: &Path) -> Result<Agent> {
         fallbacks.push(llm::create_provider(fallback_config)?);
     }
 
-    let llm: Box<dyn llm::LlmProvider> = Box::new(llm::reliable::ReliableProvider::new(
+    let reliable: Box<dyn llm::LlmProvider> = Box::new(llm::reliable::ReliableProvider::new(
         primary,
         fallbacks,
         config.llm.max_retries,
         config.llm.base_backoff_ms,
     ));
+
+    let llm: Box<dyn llm::LlmProvider> = if !config.routes.is_empty() {
+        let mut providers: std::collections::HashMap<String, Box<dyn llm::LlmProvider>> =
+            std::collections::HashMap::new();
+        providers.insert("default".to_string(), reliable);
+
+        for named in &config.extra_providers {
+            let p = llm::create_provider(&named.to_llm_config())?;
+            let wrapped = Box::new(llm::reliable::ReliableProvider::new(
+                p,
+                vec![],
+                config.llm.max_retries,
+                config.llm.base_backoff_ms,
+            ));
+            providers.insert(named.name.clone(), wrapped);
+        }
+
+        let mut routes = std::collections::HashMap::new();
+        for route in &config.routes {
+            if !providers.contains_key(&route.use_provider) && route.use_provider != "default" {
+                tracing::warn!(
+                    "Route '{}' references unknown provider '{}', skipping",
+                    route.hint,
+                    route.use_provider
+                );
+                continue;
+            }
+            routes.insert(
+                route.hint.clone(),
+                (route.use_provider.clone(), String::new()),
+            );
+        }
+
+        Box::new(llm::router::RouterProvider::new(
+            providers,
+            routes,
+            "default".to_string(),
+        )?)
+    } else {
+        reliable
+    };
 
     let mut tool_registry = tools::registry::ToolRegistry::new();
     tools::register_default_tools(&mut tool_registry);

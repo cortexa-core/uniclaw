@@ -21,6 +21,10 @@ pub struct Config {
     #[serde(default)]
     #[allow(dead_code)] // used in future phases for file logging
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub extra_providers: Vec<NamedProviderConfig>,
+    #[serde(default)]
+    pub routes: Vec<RouteConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -147,6 +151,46 @@ pub enum GroupResponseMode {
     Never,
     #[default]
     Mention,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct NamedProviderConfig {
+    pub name: String,
+    pub provider: String,
+    #[serde(default)]
+    pub api_key_env: String,
+    pub model: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_timeout")]
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct RouteConfig {
+    pub hint: String,
+    pub use_provider: String,
+}
+
+impl NamedProviderConfig {
+    pub fn to_llm_config(&self) -> LlmConfig {
+        LlmConfig {
+            provider: self.provider.clone(),
+            api_key_env: self.api_key_env.clone(),
+            model: self.model.clone(),
+            base_url: self.base_url.clone(),
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            timeout_secs: self.timeout_secs,
+            fallback: None,
+            max_retries: default_max_retries(),
+            base_backoff_ms: default_backoff(),
+        }
+    }
 }
 
 impl Default for LoggingConfig {

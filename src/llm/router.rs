@@ -22,14 +22,12 @@ impl std::fmt::Debug for RouterProvider {
     }
 }
 
-#[allow(dead_code)]
 pub struct RouterProvider {
     providers: HashMap<String, Box<dyn LlmProvider>>,
     routes: HashMap<String, (String, String)>, // hint → (provider_name, model)
     default_name: String,
 }
 
-#[allow(dead_code)]
 impl RouterProvider {
     pub fn new(
         providers: HashMap<String, Box<dyn LlmProvider>>,
@@ -64,6 +62,7 @@ impl RouterProvider {
     /// - "hint:fast" → looks up "fast" in routes table
     /// - "hint:unknown" → warns, falls back to default provider with original model stripped
     /// - "gpt-4o" → default provider, model unchanged
+    #[allow(dead_code)] // used by tests now; agent loop will call this for hint-based routing
     pub fn resolve(&self, model: &str) -> (String, String) {
         if let Some(hint) = model.strip_prefix("hint:") {
             if let Some((provider_name, resolved_model)) = self.routes.get(hint) {
