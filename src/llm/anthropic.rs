@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -167,6 +168,10 @@ impl LlmProvider for AnthropicProvider {
         "anthropic"
     }
 
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
     async fn chat(&self, context: &Context) -> Result<ChatResponse> {
         let body = self.serialize_request(context);
         let url = format!("{}/v1/messages", self.base_url);
@@ -194,6 +199,174 @@ impl LlmProvider for AnthropicProvider {
         }
 
         self.parse_response(&response_body)
+    }
+
+    async fn chat_streaming(
+        &self,
+        context: &Context,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        let mut body = self.serialize_request(context);
+        body["stream"] = json!(true);
+
+        let url = format!("{}/v1/messages", self.base_url);
+        tracing::debug!("Anthropic streaming request to {url}");
+
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_body: Value = response.json().await?;
+            let error_msg = error_body["error"]["message"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(anyhow!("Anthropic API error ({}): {}", status, error_msg));
+        }
+
+        // State for accumulating the streamed response
+        let mut full_text = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut usage = Usage::default();
+        let mut buffer = String::new();
+
+        // Current event type and tool-building state
+        let mut current_event = String::new();
+        let mut current_tool_id = String::new();
+        let mut current_tool_name = String::new();
+        let mut current_tool_args = String::new();
+        let mut building_tool = false;
+
+        let mut stream = response.bytes_stream();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Track event type
+                if let Some(event_type) = line.strip_prefix("event: ") {
+                    current_event = event_type.trim().to_string();
+                    continue;
+                }
+
+                // Process data lines
+                let Some(data) = line.strip_prefix("data: ") else {
+                    continue;
+                };
+
+                let parsed: Value = match serde_json::from_str(data) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("Failed to parse Anthropic SSE chunk: {e}");
+                        continue;
+                    }
+                };
+
+                match current_event.as_str() {
+                    "message_start" => {
+                        // Extract input token usage
+                        if let Some(input) =
+                            parsed["message"]["usage"]["input_tokens"].as_u64()
+                        {
+                            usage.input_tokens = input as u32;
+                        }
+                    }
+                    "content_block_start" => {
+                        let block_type =
+                            parsed["content_block"]["type"].as_str().unwrap_or("");
+                        if block_type == "tool_use" {
+                            building_tool = true;
+                            current_tool_id = parsed["content_block"]["id"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            current_tool_name = parsed["content_block"]["name"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            current_tool_args.clear();
+                        }
+                    }
+                    "content_block_delta" => {
+                        let delta_type = parsed["delta"]["type"].as_str().unwrap_or("");
+                        if delta_type == "text_delta" {
+                            if let Some(text) = parsed["delta"]["text"].as_str() {
+                                if !text.is_empty() {
+                                    full_text.push_str(text);
+                                    let _ = tx.send(text.to_string()).await;
+                                }
+                            }
+                        } else if delta_type == "input_json_delta" {
+                            if let Some(partial) =
+                                parsed["delta"]["partial_json"].as_str()
+                            {
+                                current_tool_args.push_str(partial);
+                            }
+                        }
+                    }
+                    "content_block_stop" => {
+                        if building_tool {
+                            let arguments: serde_json::Value =
+                                serde_json::from_str(&current_tool_args)
+                                    .unwrap_or(json!({}));
+                            tool_calls.push(ToolCall {
+                                id: current_tool_id.clone(),
+                                name: current_tool_name.clone(),
+                                arguments,
+                            });
+                            building_tool = false;
+                            current_tool_id.clear();
+                            current_tool_name.clear();
+                            current_tool_args.clear();
+                        }
+                    }
+                    "message_delta" => {
+                        if let Some(output) = parsed["usage"]["output_tokens"].as_u64()
+                        {
+                            usage.output_tokens = output as u32;
+                        }
+                    }
+                    "message_stop" => {
+                        // Stream complete
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let stop_reason = if !tool_calls.is_empty() {
+            StopReason::ToolUse
+        } else {
+            StopReason::EndTurn
+        };
+
+        let text = if full_text.is_empty() {
+            None
+        } else {
+            Some(full_text)
+        };
+
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            stop_reason,
+            usage,
+        })
     }
 }
 
