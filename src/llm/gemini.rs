@@ -38,13 +38,12 @@ impl GeminiProvider {
             .build()?;
 
         // Use Gemini default if config has the Anthropic default or is empty
-        let base_url = if config.base_url.is_empty()
-            || config.base_url == "https://api.anthropic.com"
-        {
-            "https://generativelanguage.googleapis.com".to_string()
-        } else {
-            config.base_url.clone()
-        };
+        let base_url =
+            if config.base_url.is_empty() || config.base_url == "https://api.anthropic.com" {
+                "https://generativelanguage.googleapis.com".to_string()
+            } else {
+                config.base_url.clone()
+            };
 
         Ok(Self {
             client,

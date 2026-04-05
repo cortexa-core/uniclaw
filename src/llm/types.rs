@@ -282,10 +282,7 @@ mod tests {
             LlmErrorKind::classify(Some(503), ""),
             LlmErrorKind::ServerError
         );
-        assert_eq!(
-            LlmErrorKind::classify(Some(200), "ok"),
-            LlmErrorKind::Other
-        );
+        assert_eq!(LlmErrorKind::classify(Some(200), "ok"), LlmErrorKind::Other);
     }
 
     #[test]

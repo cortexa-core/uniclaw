@@ -45,16 +45,15 @@ impl OpenAiProvider {
             .unwrap_or_default();
 
         // Use alias base_url if config has the default or is empty
-        let base_url = if config.base_url.is_empty()
-            || config.base_url == "https://api.anthropic.com"
-        {
-            alias
-                .as_ref()
-                .map(|a| a.base_url.to_string())
-                .unwrap_or_else(|| config.base_url.clone())
-        } else {
-            config.base_url.clone()
-        };
+        let base_url =
+            if config.base_url.is_empty() || config.base_url == "https://api.anthropic.com" {
+                alias
+                    .as_ref()
+                    .map(|a| a.base_url.to_string())
+                    .unwrap_or_else(|| config.base_url.clone())
+            } else {
+                config.base_url.clone()
+            };
 
         Ok(Self {
             client,

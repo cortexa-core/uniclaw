@@ -4,8 +4,8 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tracing::warn;
 
-use super::LlmProvider;
 use super::types::{ChatResponse, Context};
+use super::LlmProvider;
 
 /// Routes requests to different providers based on model hint prefixes.
 ///
@@ -151,10 +151,7 @@ mod tests {
             "anthropic".to_string(),
             Box::new(StubProvider::new("anthropic")),
         );
-        providers.insert(
-            "openai".to_string(),
-            Box::new(StubProvider::new("openai")),
-        );
+        providers.insert("openai".to_string(), Box::new(StubProvider::new("openai")));
 
         let mut routes: HashMap<String, (String, String)> = HashMap::new();
         routes.insert(
@@ -163,7 +160,10 @@ mod tests {
         );
         routes.insert(
             "reasoning".to_string(),
-            ("anthropic".to_string(), "claude-sonnet-4-20250514".to_string()),
+            (
+                "anthropic".to_string(),
+                "claude-sonnet-4-20250514".to_string(),
+            ),
         );
 
         RouterProvider::new(providers, routes, "anthropic".to_string()).unwrap()

@@ -258,13 +258,7 @@ async fn test_llm_failover() {
     let mut registry = ToolRegistry::new();
     tools::register_default_tools(&mut registry);
 
-    let mut agent = Agent::new(
-        llm,
-        registry,
-        &test_config(),
-        dir.path().to_path_buf(),
-    )
-    .await;
+    let mut agent = Agent::new(llm, registry, &test_config(), dir.path().to_path_buf()).await;
 
     let output = agent.process(&test_input("Hello")).await.unwrap();
     assert_eq!(output.content, "Fallback response!");
@@ -290,13 +284,7 @@ async fn test_llm_all_fail() {
     let mut registry = ToolRegistry::new();
     tools::register_default_tools(&mut registry);
 
-    let mut agent = Agent::new(
-        llm,
-        registry,
-        &test_config(),
-        dir.path().to_path_buf(),
-    )
-    .await;
+    let mut agent = Agent::new(llm, registry, &test_config(), dir.path().to_path_buf()).await;
 
     let result = agent.process(&test_input("Hello")).await;
     assert!(result.is_err());

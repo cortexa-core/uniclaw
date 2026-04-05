@@ -72,10 +72,7 @@ pub fn resolve(name: &str) -> Option<ProviderAlias> {
         "groq" => compat!("https://api.groq.com/openai", "GROQ_API_KEY"),
         "together" | "together-ai" => compat!("https://api.together.xyz", "TOGETHER_API_KEY"),
         "fireworks" | "fireworks-ai" => {
-            compat!(
-                "https://api.fireworks.ai/inference",
-                "FIREWORKS_API_KEY"
-            )
+            compat!("https://api.fireworks.ai/inference", "FIREWORKS_API_KEY")
         }
         "cerebras" => compat!("https://api.cerebras.ai", "CEREBRAS_API_KEY"),
         "perplexity" => compat!("https://api.perplexity.ai", "PERPLEXITY_API_KEY"),
@@ -142,10 +139,7 @@ pub fn resolve(name: &str) -> Option<ProviderAlias> {
         // ── Hosting / gateways ──────────────────────────────────────
         "deepinfra" => compat!("https://api.deepinfra.com/v1/openai", "DEEPINFRA_API_KEY"),
         "huggingface" | "hf" => {
-            compat!(
-                "https://api-inference.huggingface.co",
-                "HF_API_TOKEN"
-            )
+            compat!("https://api-inference.huggingface.co", "HF_API_TOKEN")
         }
         "venice" => compat!("https://api.venice.ai", "VENICE_API_KEY"),
         "nvidia" | "nim" => compat!("https://integrate.api.nvidia.com", "NVIDIA_API_KEY"),

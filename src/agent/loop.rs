@@ -269,7 +269,6 @@ impl Agent {
         self.session_store.persist(&input.session_id).await?;
         Ok(Output::with_usage(msg, total_usage))
     }
-
 }
 
 #[cfg(test)]

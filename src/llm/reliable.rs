@@ -2,8 +2,8 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use super::LlmProvider;
 use super::types::{ChatResponse, Context, LlmErrorKind};
+use super::LlmProvider;
 
 /// Wraps a primary provider + fallbacks with retry and exponential backoff.
 pub struct ReliableProvider {
@@ -69,7 +69,8 @@ impl ReliableProvider {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| anyhow!("Provider {} failed with no attempts", provider.name())))
+        Err(last_error
+            .unwrap_or_else(|| anyhow!("Provider {} failed with no attempts", provider.name())))
     }
 }
 
@@ -100,10 +101,7 @@ impl LlmProvider for ReliableProvider {
             }
         }
 
-        Err(anyhow!(
-            "All providers failed:\n  {}",
-            errors.join("\n  ")
-        ))
+        Err(anyhow!("All providers failed:\n  {}", errors.join("\n  ")))
     }
 
     fn name(&self) -> &str {
@@ -238,8 +236,7 @@ mod tests {
         let fallback = MockProvider::new("fallback", 0, "");
         let fallback_calls = fallback.call_count.clone();
 
-        let reliable =
-            ReliableProvider::new(Box::new(primary), vec![Box::new(fallback)], 3, 10);
+        let reliable = ReliableProvider::new(Box::new(primary), vec![Box::new(fallback)], 3, 10);
 
         let resp = reliable.chat(&test_context()).await.unwrap();
         assert_eq!(resp.text.as_deref(), Some("Hello!"));
@@ -253,8 +250,7 @@ mod tests {
         let primary = MockProvider::new("primary", 100, "API error (500): server error");
         let fallback = MockProvider::new("fallback", 100, "API error (500): server error");
 
-        let reliable =
-            ReliableProvider::new(Box::new(primary), vec![Box::new(fallback)], 2, 10);
+        let reliable = ReliableProvider::new(Box::new(primary), vec![Box::new(fallback)], 2, 10);
 
         let err = reliable.chat(&test_context()).await.unwrap_err();
         assert!(
@@ -275,9 +271,6 @@ mod tests {
             Some(500)
         );
         assert_eq!(extract_status_code("no status code here"), None);
-        assert_eq!(
-            extract_status_code("(401) unauthorized"),
-            Some(401)
-        );
+        assert_eq!(extract_status_code("(401) unauthorized"), Some(401));
     }
 }
