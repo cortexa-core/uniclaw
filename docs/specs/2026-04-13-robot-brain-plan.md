@@ -1,12 +1,168 @@
-# Robot Brain Foundation — Implementation Plan
+# Robot Brain Foundation — Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the robot brain foundation — robot description, world state, hardware bridge (mock + serial), action system, safety monitor, perception (camera + cloud VLM), and voice pipeline (STT + TTS). A desktop companion robot as the first demo.
+**Goal:** Build the robot brain foundation — robot description, world state, hardware bridge (mock + serial), action system, safety monitor, perception (camera + cloud VLM), and voice pipeline (cloud STT + cloud TTS). Desktop companion robot as first demo.
 
-**Architecture:** Robot runtime as Tokio tasks alongside existing agent worker. HardwareBridge trait abstracts mock/serial/ROS2. World state via `watch` channel (one writer, many readers). Actions as LLM tools auto-registered from robot.toml.
+**Architecture:** Robot runtime as Tokio tasks alongside existing agent worker. HardwareBridge trait abstracts mock/serial/ROS2. World state via `watch` channel (one writer, many readers). Actions as LLM tools auto-registered from robot.toml. Three communication channels only: world_state (watch), action_tx (mpsc), agent_tx (mpsc, existing).
 
-**Tech Stack:** Rust, Tokio, serde, tokio-serial, cpal (audio), ort (ONNX for Piper TTS)
+**Tech Stack:** Rust, Tokio, serde, tokio-serial, cpal (audio), tokio-tungstenite (ROS2 bridge)
+
+**Review fixes applied (v2):** Added Task 0 (image support), extended ToolContext with action/world channels, simplified channel architecture (3 channels not 6), added safety rule expression parser detail, switched to cloud TTS for MVP (no ort/Piper dependency), added reference MCU firmware, added audio playback via cpal.
+
+---
+
+## Prerequisites
+
+### Task 0: Add image support to LLM message types and providers
+
+**Why this is first:** The perception pipeline (Task 8) needs to send camera frames to vision LLMs. The current `MessageContent` enum has no image variant. Without this, `take_photo` can't work.
+
+**Files:**
+- Modify: `src/llm/types.rs`
+- Modify: `src/llm/anthropic.rs`
+- Modify: `src/llm/openai.rs`
+- Modify: `src/llm/gemini.rs`
+
+- [ ] **Step 1: Add image content variant to MessageContent**
+
+In `src/llm/types.rs`, add a new variant to `MessageContent`:
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageContent {
+    Text {
+        text: String,
+    },
+    TextWithImage {
+        text: String,
+        image_base64: String,
+        mime_type: String,  // "image/jpeg", "image/png"
+    },
+    ToolUse {
+        text: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
+}
+```
+
+Update `content_text()` to handle the new variant:
+
+```rust
+pub fn content_text(&self) -> &str {
+    match &self.content {
+        MessageContent::Text { text } => text,
+        MessageContent::TextWithImage { text, .. } => text,
+        MessageContent::ToolUse { text, .. } => text.as_deref().unwrap_or("[tool call]"),
+        MessageContent::ToolResult { content, .. } => content,
+    }
+}
+```
+
+Add a constructor:
+
+```rust
+pub fn user_with_image(text: &str, image_base64: String, mime_type: &str) -> Self {
+    Self {
+        role: Role::User,
+        content: MessageContent::TextWithImage {
+            text: text.to_string(),
+            image_base64,
+            mime_type: mime_type.to_string(),
+        },
+    }
+}
+```
+
+- [ ] **Step 2: Update Anthropic serializer**
+
+In `src/llm/anthropic.rs`, in `serialize_messages()`, add a case for `TextWithImage`:
+
+```rust
+MessageContent::TextWithImage { text, image_base64, mime_type } => {
+    result.push(json!({
+        "role": msg.role.to_string(),
+        "content": [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": image_base64,
+                }
+            },
+            {
+                "type": "text",
+                "text": text,
+            }
+        ],
+    }));
+}
+```
+
+- [ ] **Step 3: Update OpenAI serializer**
+
+In `src/llm/openai.rs`, in `serialize_request()`, add a case for `TextWithImage`:
+
+```rust
+MessageContent::TextWithImage { text, image_base64, mime_type } => {
+    messages.push(json!({
+        "role": msg.role.to_string(),
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": format!("data:{mime_type};base64,{image_base64}"),
+                }
+            },
+            {
+                "type": "text",
+                "text": text,
+            }
+        ],
+    }));
+}
+```
+
+- [ ] **Step 4: Update Gemini serializer**
+
+In `src/llm/gemini.rs`, in `serialize_messages()`, add a case for `TextWithImage`:
+
+```rust
+MessageContent::TextWithImage { text, image_base64, mime_type } => {
+    result.push(json!({
+        "role": "user",
+        "parts": [
+            {
+                "inlineData": {
+                    "mimeType": mime_type,
+                    "data": image_base64,
+                }
+            },
+            {"text": text}
+        ]
+    }));
+}
+```
+
+- [ ] **Step 5: Update streaming serializers**
+
+The `chat_streaming()` methods in all three providers call `serialize_request()` which already handles the new variant (same serialization code). No additional streaming changes needed.
+
+- [ ] **Step 6: Add tests**
+
+Add tests in each provider verifying image messages serialize correctly. Add a roundtrip test in types.rs for the new variant.
+
+- [ ] **Step 7: Run tests and commit**
+
+```
+git commit -m "Add image support to LLM message types for vision-capable providers"
+```
 
 ---
 
@@ -15,151 +171,17 @@
 ### Task 1: HardwareBridge trait and MockBridge
 
 **Files:**
+- Create: `src/robot/mod.rs`
 - Create: `src/robot/bridge/mod.rs`
 - Create: `src/robot/bridge/mock.rs`
-- Create: `src/robot/mod.rs`
+- Modify: `src/main.rs` (add `mod robot;`)
 
-- [ ] **Step 1: Create the HardwareBridge trait**
+The HardwareBridge trait and MockBridge implementation as specified in the original plan. No changes from v1.
 
-Create `src/robot/bridge/mod.rs`:
-
-```rust
-pub mod mock;
-
-use anyhow::Result;
-use async_trait::async_trait;
-use std::collections::HashMap;
-
-/// A command sent to the hardware (actuators, LEDs, etc.)
-#[derive(Debug, Clone)]
-pub enum HardwareCommand {
-    ServoSet { name: String, angle: f32, speed_deg_s: Option<f32> },
-    MotorSet { name: String, speed: f32, duration_ms: Option<u64> },
-    LedSet { name: String, r: u8, g: u8, b: u8 },
-    LedPattern { name: String, pattern: String },
-    Ping,
-    EmergencyStop,
-}
-
-/// A sensor reading from the hardware
-#[derive(Debug, Clone)]
-pub enum SensorValue {
-    Distance(f32),
-    Temperature(f32),
-    Orientation { roll: f32, pitch: f32, yaw: f32 },
-    Boolean(bool),
-    Raw(i32),
-}
-
-/// Abstraction over hardware communication.
-/// Implementations: MockBridge, SerialBridge, RosBridge.
-#[async_trait]
-pub trait HardwareBridge: Send + Sync {
-    /// Send a command to an actuator
-    async fn send_command(&self, cmd: HardwareCommand) -> Result<()>;
-
-    /// Read a specific sensor
-    async fn read_sensor(&self, sensor_id: &str) -> Result<SensorValue>;
-
-    /// Read all sensors at once
-    async fn read_all_sensors(&self) -> Result<HashMap<String, SensorValue>>;
-
-    /// Send heartbeat (keep MCU watchdog alive)
-    async fn heartbeat(&self) -> Result<()>;
-
-    /// Emergency stop all actuators
-    async fn emergency_stop(&self) -> Result<()>;
-
-    /// Bridge name for logging
-    fn name(&self) -> &str;
-}
-```
-
-- [ ] **Step 2: Create MockBridge**
-
-Create `src/robot/bridge/mock.rs`:
-
-```rust
-use super::{HardwareBridge, HardwareCommand, SensorValue};
-use anyhow::Result;
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Mutex;
-
-/// Mock bridge for development. Logs commands, returns synthetic sensor data.
-pub struct MockBridge {
-    command_log: Mutex<Vec<HardwareCommand>>,
-    sensors: Mutex<HashMap<String, SensorValue>>,
-}
-
-impl MockBridge {
-    pub fn new() -> Self {
-        let mut sensors = HashMap::new();
-        sensors.insert("front_distance".into(), SensorValue::Distance(100.0));
-        sensors.insert("battery".into(), SensorValue::Raw(85));
-        Self {
-            command_log: Mutex::new(Vec::new()),
-            sensors: Mutex::new(sensors),
-        }
-    }
-
-    /// Get logged commands (for testing)
-    #[cfg(test)]
-    pub fn logged_commands(&self) -> Vec<HardwareCommand> {
-        self.command_log.lock().unwrap().clone()
-    }
-}
-
-#[async_trait]
-impl HardwareBridge for MockBridge {
-    async fn send_command(&self, cmd: HardwareCommand) -> Result<()> {
-        tracing::debug!("[MockBridge] Command: {cmd:?}");
-        self.command_log.lock().unwrap().push(cmd);
-        Ok(())
-    }
-
-    async fn read_sensor(&self, sensor_id: &str) -> Result<SensorValue> {
-        self.sensors.lock().unwrap()
-            .get(sensor_id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Unknown sensor: {sensor_id}"))
-    }
-
-    async fn read_all_sensors(&self) -> Result<HashMap<String, SensorValue>> {
-        Ok(self.sensors.lock().unwrap().clone())
-    }
-
-    async fn heartbeat(&self) -> Result<()> {
-        tracing::trace!("[MockBridge] Heartbeat");
-        Ok(())
-    }
-
-    async fn emergency_stop(&self) -> Result<()> {
-        tracing::warn!("[MockBridge] EMERGENCY STOP");
-        self.command_log.lock().unwrap().push(HardwareCommand::EmergencyStop);
-        Ok(())
-    }
-
-    fn name(&self) -> &str {
-        "mock"
-    }
-}
-```
-
-- [ ] **Step 3: Create robot module root**
-
-Create `src/robot/mod.rs`:
-
-```rust
-pub mod bridge;
-```
-
-Add `mod robot;` to `src/main.rs` (or `src/lib.rs`).
-
-- [ ] **Step 4: Add tests**
-
-Add tests in `src/robot/bridge/mock.rs` verifying MockBridge logs commands and returns sensor data.
-
+- [ ] **Step 1: Create HardwareBridge trait** (`src/robot/bridge/mod.rs`)
+- [ ] **Step 2: Create MockBridge** (`src/robot/bridge/mock.rs`)
+- [ ] **Step 3: Create robot module root** (`src/robot/mod.rs`, add `mod robot;` to main.rs)
+- [ ] **Step 4: Add tests for MockBridge**
 - [ ] **Step 5: Run tests and commit**
 
 ```
@@ -172,382 +194,14 @@ git commit -m "Add HardwareBridge trait and MockBridge for development"
 
 **Files:**
 - Create: `src/robot/description.rs`
+- Create: `data/robot.toml` (example)
 - Modify: `src/robot/mod.rs`
 
-- [ ] **Step 1: Define robot description types**
+The robot description parser as specified in v1. No changes.
 
-Create `src/robot/description.rs` with serde structs matching the robot.toml format from the design:
-
-```rust
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct RobotDescription {
-    pub robot: RobotInfo,
-    #[serde(default)]
-    pub body: BodyConfig,
-    #[serde(default)]
-    pub sensors: Vec<SensorConfig>,
-    #[serde(default)]
-    pub actuators: Vec<ActuatorConfig>,
-    #[serde(default)]
-    pub safety: SafetyConfig,
-    #[serde(default)]
-    pub behaviors: BehaviorConfig,
-    #[serde(default)]
-    pub perception: PerceptionConfig,
-    #[serde(default)]
-    pub voice: VoiceConfig,
-    #[serde(default)]
-    pub hardware: HardwareConfig,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct RobotInfo {
-    pub name: String,
-    #[serde(default = "default_robot_type")]
-    pub r#type: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct BodyConfig {
-    #[serde(default = "default_base")]
-    pub base: String,
-    #[serde(default)]
-    pub weight_kg: f32,
-    #[serde(default)]
-    pub height_cm: f32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SensorConfig {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub sensor_type: String,
-    #[serde(default)]
-    pub device: String,
-    #[serde(default)]
-    pub pin: Option<u8>,
-    #[serde(default)]
-    pub resolution: Option<String>,
-    #[serde(default)]
-    pub fps: Option<u32>,
-    #[serde(default)]
-    pub max_range_cm: Option<f32>,
-    #[serde(default)]
-    pub poll_interval_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ActuatorConfig {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub actuator_type: String,
-    #[serde(default)]
-    pub pin: Option<u8>,
-    #[serde(default)]
-    pub angle_range: Option<[f32; 2]>,
-    #[serde(default)]
-    pub default_angle: Option<f32>,
-    #[serde(default)]
-    pub device: Option<String>,
-    #[serde(default)]
-    pub count: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct SafetyConfig {
-    #[serde(default = "default_watchdog")]
-    pub watchdog_timeout_ms: u64,
-    #[serde(default)]
-    pub emergency_stop_pin: Option<u8>,
-    #[serde(default)]
-    pub rules: Vec<SafetyRuleConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SafetyRuleConfig {
-    pub name: String,
-    pub condition: String,
-    pub action: String,
-    #[serde(default = "default_priority")]
-    pub priority: u8,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct BehaviorConfig {
-    #[serde(default)]
-    pub idle: Option<String>,
-    #[serde(default)]
-    pub on_face_detected: Option<String>,
-    #[serde(default)]
-    pub on_touch: Option<String>,
-    #[serde(default)]
-    pub on_name_called: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct PerceptionConfig {
-    #[serde(default)]
-    pub vision_provider: Option<String>,
-    #[serde(default)]
-    pub vision_model: Option<String>,
-    #[serde(default = "default_vision_trigger")]
-    pub vision_trigger: String,
-    #[serde(default = "default_vision_periodic")]
-    pub vision_periodic_secs: u64,
-    #[serde(default = "default_true_bool")]
-    pub motion_detection: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct VoiceConfig {
-    #[serde(default)]
-    pub stt_provider: Option<String>,
-    #[serde(default)]
-    pub stt_model: Option<String>,
-    #[serde(default)]
-    pub tts_engine: Option<String>,
-    #[serde(default)]
-    pub tts_model: Option<String>,
-    #[serde(default = "default_tts_speed")]
-    pub tts_speed: f32,
-    #[serde(default)]
-    pub vad_enabled: bool,
-    #[serde(default)]
-    pub wake_word: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct HardwareConfig {
-    #[serde(default = "default_bridge")]
-    pub bridge: String,
-    #[serde(default)]
-    pub port: Option<String>,
-    #[serde(default = "default_baud")]
-    pub baud_rate: u32,
-    #[serde(default)]
-    pub ros2: Option<Ros2Config>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Ros2Config {
-    pub url: String,
-    #[serde(default)]
-    pub camera_topic: Option<String>,
-    #[serde(default)]
-    pub cmd_vel_topic: Option<String>,
-    #[serde(default)]
-    pub odom_topic: Option<String>,
-    #[serde(default)]
-    pub scan_topic: Option<String>,
-    #[serde(default)]
-    pub navigate_action: Option<String>,
-}
-
-impl RobotDescription {
-    pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))?;
-        toml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse robot.toml: {e}"))
-    }
-
-    /// Generate a system prompt section describing the robot's body.
-    pub fn to_system_prompt(&self) -> String {
-        let mut lines = vec![format!("## Robot Body\n")];
-        lines.push(format!("You are {}, a {}.", self.robot.name, self.robot.description));
-        lines.push(format!("Base: {} | Weight: {}kg | Height: {}cm\n",
-            self.body.base, self.body.weight_kg, self.body.height_cm));
-
-        if !self.sensors.is_empty() {
-            lines.push("Sensors:".to_string());
-            for s in &self.sensors {
-                lines.push(format!("- {} ({})", s.name, s.sensor_type));
-            }
-        }
-        if !self.actuators.is_empty() {
-            lines.push("\nActuators:".to_string());
-            for a in &self.actuators {
-                let range = a.angle_range
-                    .map(|r| format!(", range {}°-{}°", r[0], r[1]))
-                    .unwrap_or_default();
-                lines.push(format!("- {} ({}{})", a.name, a.actuator_type, range));
-            }
-        }
-        lines.join("\n")
-    }
-
-    /// List actuator names that exist for tool auto-registration.
-    pub fn actuator_names(&self) -> Vec<&str> {
-        self.actuators.iter().map(|a| a.name.as_str()).collect()
-    }
-
-    /// Check if a specific actuator type exists.
-    pub fn has_actuator_type(&self, t: &str) -> bool {
-        self.actuators.iter().any(|a| a.actuator_type == t)
-    }
-
-    /// Check if a specific sensor type exists.
-    pub fn has_sensor_type(&self, t: &str) -> bool {
-        self.sensors.iter().any(|a| a.sensor_type == t)
-    }
-}
-
-// Default functions
-fn default_robot_type() -> String { "custom".into() }
-fn default_base() -> String { "fixed".into() }
-fn default_watchdog() -> u64 { 500 }
-fn default_priority() -> u8 { 5 }
-fn default_vision_trigger() -> String { "event".into() }
-fn default_vision_periodic() -> u64 { 30 }
-fn default_true_bool() -> bool { true }
-fn default_tts_speed() -> f32 { 1.0 }
-fn default_bridge() -> String { "mock".into() }
-fn default_baud() -> u32 { 115200 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_minimal_robot_toml() {
-        let toml = r#"
-[robot]
-name = "TestBot"
-description = "A test robot"
-
-[hardware]
-bridge = "mock"
-"#;
-        let desc: RobotDescription = toml::from_str(toml).unwrap();
-        assert_eq!(desc.robot.name, "TestBot");
-        assert_eq!(desc.hardware.bridge, "mock");
-        assert!(desc.sensors.is_empty());
-        assert!(desc.actuators.is_empty());
-    }
-
-    #[test]
-    fn test_parse_full_robot_toml() {
-        let toml = r#"
-[robot]
-name = "Buddy"
-type = "desktop_companion"
-description = "A small desktop robot"
-
-[body]
-base = "fixed"
-weight_kg = 0.5
-height_cm = 20
-
-[[sensors]]
-name = "camera"
-type = "camera"
-device = "/dev/video0"
-
-[[sensors]]
-name = "front_distance"
-type = "ultrasonic"
-pin = 7
-max_range_cm = 200
-
-[[actuators]]
-name = "left_arm"
-type = "servo"
-pin = 12
-angle_range = [0, 180]
-default_angle = 90
-
-[[actuators]]
-name = "speaker"
-type = "audio_output"
-
-[safety]
-watchdog_timeout_ms = 500
-
-[[safety.rules]]
-name = "obstacle_stop"
-condition = "front_distance < 10"
-action = "stop_all_motors"
-priority = 10
-
-[perception]
-vision_provider = "gemini"
-vision_model = "gemini-2.0-flash"
-
-[voice]
-stt_provider = "whisper"
-tts_engine = "piper"
-
-[hardware]
-bridge = "serial"
-port = "/dev/ttyUSB0"
-"#;
-        let desc: RobotDescription = toml::from_str(toml).unwrap();
-        assert_eq!(desc.robot.name, "Buddy");
-        assert_eq!(desc.sensors.len(), 2);
-        assert_eq!(desc.actuators.len(), 2);
-        assert_eq!(desc.safety.rules.len(), 1);
-        assert!(desc.has_sensor_type("camera"));
-        assert!(desc.has_actuator_type("servo"));
-        assert!(!desc.has_actuator_type("motor"));
-    }
-
-    #[test]
-    fn test_system_prompt_generation() {
-        let toml = r#"
-[robot]
-name = "Buddy"
-description = "A small desktop robot with arms"
-
-[[actuators]]
-name = "left_arm"
-type = "servo"
-angle_range = [0, 180]
-
-[hardware]
-bridge = "mock"
-"#;
-        let desc: RobotDescription = toml::from_str(toml).unwrap();
-        let prompt = desc.to_system_prompt();
-        assert!(prompt.contains("Buddy"));
-        assert!(prompt.contains("left_arm"));
-        assert!(prompt.contains("servo"));
-    }
-
-    #[test]
-    fn test_ros2_config() {
-        let toml = r#"
-[robot]
-name = "Rover"
-
-[hardware]
-bridge = "ros2"
-
-[hardware.ros2]
-url = "ws://localhost:9090"
-cmd_vel_topic = "/cmd_vel"
-odom_topic = "/odom"
-"#;
-        let desc: RobotDescription = toml::from_str(toml).unwrap();
-        assert_eq!(desc.hardware.bridge, "ros2");
-        let ros2 = desc.hardware.ros2.unwrap();
-        assert_eq!(ros2.url, "ws://localhost:9090");
-        assert_eq!(ros2.cmd_vel_topic.unwrap(), "/cmd_vel");
-    }
-}
-```
-
-- [ ] **Step 2: Register module**
-
-Add `pub mod description;` to `src/robot/mod.rs`.
-
-- [ ] **Step 3: Create example robot.toml**
-
-Create `data/robot.toml` with the desktop companion example from the design spec.
-
+- [ ] **Step 1: Create description types and parser** (`src/robot/description.rs`)
+- [ ] **Step 2: Register module, create example robot.toml**
+- [ ] **Step 3: Add tests** (minimal parse, full parse, system prompt generation, ROS2 config)
 - [ ] **Step 4: Run tests and commit**
 
 ```
@@ -556,218 +210,119 @@ git commit -m "Add robot description parser for robot.toml"
 
 ---
 
-### Task 3: World state and robot runtime skeleton
+### Task 3: World state, runtime, CLI, ToolContext extension, context injection
 
 **Files:**
 - Create: `src/robot/world_state.rs`
 - Create: `src/robot/runtime.rs`
 - Modify: `src/robot/mod.rs`
-- Modify: `src/main.rs` (add `robot` subcommand)
+- Modify: `src/main.rs` (add `Robot` subcommand + `run_robot()`)
+- Modify: `src/agent/context.rs` (add robot_prompt + world_rx)
+- Modify: `src/tools/registry.rs` (extend ToolContext)
 
-- [ ] **Step 1: Create WorldState**
+This is the largest task — it wires the robot runtime into the existing agent.
 
-Create `src/robot/world_state.rs` with the WorldState struct and a `tokio::sync::watch` channel wrapper.
+- [ ] **Step 1: Create WorldState** (`src/robot/world_state.rs`)
+
+As specified in v1, with `to_context_section()` for LLM prompt injection.
+
+- [ ] **Step 2: Create RobotRuntime** (`src/robot/runtime.rs`)
+
+As specified in v1. Spawns sensor polling task, manages watch channel.
+
+Simplification from v1: Only 3 channels:
+- `world_tx/rx` (watch) — sensor data + perception state
+- `action_tx/rx` (mpsc) — agent → hardware bridge
+- `agent_tx/rx` (mpsc) — existing, voice/text/events → agent
+
+Remove the 3 extra channels from the original design (event_tx, hw_tx, sensor_tx). The runtime writes sensors directly to world_tx. The action executor calls bridge methods directly.
+
+- [ ] **Step 3: Extend ToolContext with robot capabilities**
+
+In `src/tools/registry.rs`, add optional robot fields:
 
 ```rust
-use std::collections::HashMap;
-use std::time::Instant;
-
-/// Shared view of the physical world.
-/// Published via tokio::sync::watch (one writer, many readers, lock-free).
-#[derive(Debug, Clone)]
-pub struct WorldState {
-    pub timestamp: Instant,
-
-    // Vision
-    pub scene_description: Option<String>,
-    pub scene_timestamp: Option<Instant>,
-    pub motion_detected: bool,
-
-    // Audio
-    pub last_speech: Option<(Instant, String)>,
-    pub voice_active: bool,
-
-    // Sensors (from hardware bridge)
-    pub sensors: HashMap<String, super::bridge::SensorValue>,
-
-    // Body state
-    pub actuator_positions: HashMap<String, f32>,
-    pub battery_percent: Option<f32>,
-    pub is_moving: bool,
-
-    // Active state
-    pub current_behavior: Option<String>,
-    pub last_action: Option<(Instant, String)>,
-}
-
-impl Default for WorldState {
-    fn default() -> Self {
-        Self {
-            timestamp: Instant::now(),
-            scene_description: None,
-            scene_timestamp: None,
-            motion_detected: false,
-            last_speech: None,
-            voice_active: false,
-            sensors: HashMap::new(),
-            actuator_positions: HashMap::new(),
-            battery_percent: None,
-            is_moving: false,
-            current_behavior: None,
-            last_action: None,
-        }
-    }
-}
-
-impl WorldState {
-    /// Generate a perception summary for the LLM context.
-    pub fn to_context_section(&self) -> String {
-        let mut lines = vec!["## Current Perception\n".to_string()];
-
-        if let Some(ref desc) = self.scene_description {
-            let age = self.scene_timestamp
-                .map(|t| format!("{}s ago", t.elapsed().as_secs()))
-                .unwrap_or_else(|| "unknown".into());
-            lines.push(format!("Scene ({age}): {desc}"));
-        }
-
-        lines.push(format!("Motion detected: {}", self.motion_detected));
-
-        if !self.sensors.is_empty() {
-            lines.push("Sensors:".into());
-            for (name, value) in &self.sensors {
-                lines.push(format!("  {name}: {value:?}"));
-            }
-        }
-
-        if let Some(pct) = self.battery_percent {
-            lines.push(format!("Battery: {pct:.0}%"));
-        }
-
-        if let Some(ref behavior) = self.current_behavior {
-            lines.push(format!("Current behavior: {behavior}"));
-        }
-
-        lines.join("\n")
-    }
+pub struct ToolContext {
+    pub data_dir: PathBuf,
+    pub session_id: String,
+    pub config: Arc<Config>,
+    /// For robot tools: send action commands to the hardware bridge
+    pub action_tx: Option<tokio::sync::mpsc::Sender<super::robot::bridge::HardwareCommand>>,
+    /// For robot tools: read current world state
+    pub world_rx: Option<tokio::sync::watch::Receiver<super::robot::world_state::WorldState>>,
 }
 ```
 
-- [ ] **Step 2: Create robot runtime skeleton**
+Update ALL places that construct ToolContext to add `action_tx: None, world_rx: None`. These are:
+- `src/agent/loop.rs` (process_inner, where ToolContext is built for tool execution)
 
-Create `src/robot/runtime.rs` — the main orchestrator that spawns perception, safety, and sensor polling tasks:
+In robot mode, these fields are set to `Some(...)`.
 
-```rust
-use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+- [ ] **Step 4: Inject robot context into ContextBuilder**
 
-use super::bridge::HardwareBridge;
-use super::description::RobotDescription;
-use super::world_state::WorldState;
-
-/// The robot runtime — manages perception, safety, and sensor loops.
-pub struct RobotRuntime {
-    description: Arc<RobotDescription>,
-    bridge: Arc<dyn HardwareBridge>,
-    world_tx: watch::Sender<WorldState>,
-    world_rx: watch::Receiver<WorldState>,
-}
-
-impl RobotRuntime {
-    pub fn new(
-        description: RobotDescription,
-        bridge: Box<dyn HardwareBridge>,
-    ) -> Self {
-        let (world_tx, world_rx) = watch::channel(WorldState::default());
-        Self {
-            description: Arc::new(description),
-            bridge: Arc::from(bridge),
-            world_tx,
-            world_rx,
-        }
-    }
-
-    /// Get a world state receiver (for agent context builder, safety monitor, etc.)
-    pub fn world_rx(&self) -> watch::Receiver<WorldState> {
-        self.world_rx.clone()
-    }
-
-    /// Get the robot description
-    pub fn description(&self) -> &RobotDescription {
-        &self.description
-    }
-
-    /// Start all runtime tasks. Returns join handles.
-    pub async fn start(&self) -> Vec<tokio::task::JoinHandle<()>> {
-        let mut tasks = Vec::new();
-
-        // Sensor polling task
-        let bridge = self.bridge.clone();
-        let world_tx = self.world_tx.clone();
-        let poll_interval = std::time::Duration::from_millis(200);
-        tasks.push(tokio::spawn(async move {
-            loop {
-                if let Ok(sensors) = bridge.read_all_sensors().await {
-                    world_tx.send_modify(|state| {
-                        state.sensors = sensors;
-                        state.timestamp = std::time::Instant::now();
-                    });
-                }
-                // Send heartbeat to keep watchdog alive
-                bridge.heartbeat().await.ok();
-                tokio::time::sleep(poll_interval).await;
-            }
-        }));
-
-        tracing::info!("Robot runtime started with {} sensor(s), {} actuator(s)",
-            self.description.sensors.len(),
-            self.description.actuators.len(),
-        );
-
-        tasks
-    }
-
-    /// Get a reference to the hardware bridge (for action executor)
-    pub fn bridge(&self) -> Arc<dyn HardwareBridge> {
-        self.bridge.clone()
-    }
-}
-```
-
-- [ ] **Step 3: Add `robot` CLI subcommand to main.rs**
-
-Add a `Robot` variant to the `Commands` enum:
-
-```rust
-    /// Start in robot mode (continuous perception + action loop)
-    Robot {
-        /// Path to robot description file
-        #[arg(long, default_value = "data/robot.toml")]
-        robot_config: PathBuf,
-    },
-```
-
-Add `run_robot()` function that loads robot.toml, creates the bridge, starts the runtime, and spawns the agent worker with robot context.
-
-- [ ] **Step 4: Inject robot description + world state into agent context**
-
-Modify `src/agent/context.rs` to optionally include robot description and world state sections when building the system prompt. Add optional fields:
+In `src/agent/context.rs`, add optional fields:
 
 ```rust
 pub struct ContextBuilder {
     // ... existing fields ...
     robot_prompt: Option<String>,
-    world_rx: Option<watch::Receiver<WorldState>>,
+    world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
 }
 ```
 
-When building the system prompt, append `robot_prompt` and `world_rx.borrow().to_context_section()` if present.
+Add setter methods:
+```rust
+pub fn set_robot_context(
+    &mut self,
+    robot_prompt: String,
+    world_rx: tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>,
+) {
+    self.robot_prompt = Some(robot_prompt);
+    self.world_rx = Some(world_rx);
+}
+```
 
-- [ ] **Step 5: Add tests and commit**
+In `build_system_prompt()`, after skills section, append:
+```rust
+if let Some(ref prompt) = self.robot_prompt {
+    parts.push(prompt.clone());
+}
+if let Some(ref rx) = self.world_rx {
+    parts.push(rx.borrow().to_context_section());
+}
+```
+
+Initialize `robot_prompt: None, world_rx: None` in `ContextBuilder::new()`.
+
+- [ ] **Step 5: Add `Robot` CLI subcommand**
+
+In `src/main.rs`, add to `Commands` enum:
+
+```rust
+    Robot {
+        #[arg(long, default_value = "data/robot.toml")]
+        robot_config: PathBuf,
+        #[arg(long, short)]
+        message: Option<String>,
+    },
+```
+
+Add `run_robot()` function:
+1. Load config + robot.toml
+2. Create bridge (mock/serial based on robot.toml)
+3. Create RobotRuntime
+4. Create agent with robot context injected
+5. Spawn agent worker with action_tx and world_rx in ToolContext
+6. Start runtime tasks
+7. If `message` provided: single-shot mode. Otherwise: REPL (like chat).
+8. Wait for Ctrl+C
+
+- [ ] **Step 6: Add tests and commit**
+
+Test: Load robot.toml → create runtime with MockBridge → verify world state updates → verify context includes robot description.
 
 ```
-git commit -m "Add world state, robot runtime skeleton, and robot CLI command"
+git commit -m "Add world state, runtime, robot CLI, ToolContext extension, and context injection"
 ```
 
 ---
@@ -779,15 +334,53 @@ git commit -m "Add world state, robot runtime skeleton, and robot CLI command"
 **Files:**
 - Create: `src/robot/action.rs`
 - Modify: `src/robot/mod.rs`
+- Modify: `src/robot/runtime.rs` (spawn executor task)
 
-- [ ] **Step 1: Define action types and executor**
+- [ ] **Step 1: Define ActionCommand enum**
 
-Create `src/robot/action.rs` with ActionCommand enum and ActionExecutor that translates actions to hardware bridge commands. The executor runs as a Tokio task, receives actions via mpsc channel.
+```rust
+#[derive(Debug, Clone)]
+pub enum ActionCommand {
+    ServoSet { name: String, angle: f32 },
+    MotorSet { name: String, speed: f32, duration_ms: Option<u64> },
+    LedSet { name: String, r: u8, g: u8, b: u8 },
+    LedPattern { name: String, pattern: String },
+    Speak { text: String },
+    PlaySound { file: String },
+    Stop,
+    EmergencyStop,
+}
+```
 
-- [ ] **Step 2: Add tests and commit**
+- [ ] **Step 2: Create ActionExecutor**
+
+```rust
+pub struct ActionExecutor {
+    bridge: Arc<dyn HardwareBridge>,
+    action_rx: mpsc::Receiver<ActionCommand>,
+    world_tx: watch::Sender<WorldState>,
+}
+```
+
+The executor runs as a Tokio task:
+- Receive ActionCommand from channel
+- Translate to HardwareCommand and send via bridge
+- For `Speak`: call cloud TTS API (or future local TTS), play audio
+- Update world state (actuator_positions)
+- Log actions for debugging
+
+Note: `Speak` initially just logs the text. Voice output is added in Task 9.
+
+- [ ] **Step 3: Wire executor into RobotRuntime::start()**
+
+Create the action channel in runtime, spawn the executor task, expose `action_tx()` for tools.
+
+- [ ] **Step 4: Add tests and commit**
+
+Test: Send ActionCommand → MockBridge receives corresponding HardwareCommand.
 
 ```
-git commit -m "Add action types and executor for robot commands"
+git commit -m "Add action types and executor for robot hardware commands"
 ```
 
 ---
@@ -800,11 +393,32 @@ git commit -m "Add action types and executor for robot commands"
 
 - [ ] **Step 1: Create robot action tools**
 
-Create tools that the LLM can call: `say`, `set_servo`, `set_led`, `stop`, `look_at`, `get_sensor`, `take_photo`. Each tool sends an ActionCommand to the action executor.
+Tools the LLM can call. Each sends an ActionCommand via the `action_tx` in ToolContext:
 
-Tools are auto-registered based on robot.toml capabilities — if no servos defined, the `set_servo` tool isn't registered.
+| Tool | Parameters | Requires |
+|------|-----------|----------|
+| `set_servo` | name, angle | Any servo actuator in robot.toml |
+| `set_led` | name, r, g, b | Any led/neopixel actuator |
+| `set_led_pattern` | name, pattern | Any led/neopixel actuator |
+| `say` | text | speaker actuator |
+| `stop` | — | Any actuator |
+| `get_sensor` | name | Any sensor |
+| `get_world_state` | — | Always available in robot mode |
 
-- [ ] **Step 2: Add tests and commit**
+Each tool:
+1. Validates parameters against robot.toml (e.g., servo angle within range)
+2. Sends ActionCommand to action_tx
+3. Returns success/error to LLM
+
+**Auto-registration**: Create a `register_robot_tools(registry, description)` function that only registers tools for capabilities the robot has. If no servos → no `set_servo` tool. If no LEDs → no `set_led` tool.
+
+- [ ] **Step 2: Add `get_world_state` tool**
+
+This tool returns the current world state as text — sensors, perception, body state. Uses `world_rx` from ToolContext.
+
+- [ ] **Step 3: Add tests and commit**
+
+Test with MockBridge: call `set_servo` tool → verify MockBridge received the command.
 
 ```
 git commit -m "Add robot action tools auto-registered from robot.toml capabilities"
@@ -812,43 +426,120 @@ git commit -m "Add robot action tools auto-registered from robot.toml capabiliti
 
 ---
 
-### Task 6: Safety monitor
+### Task 6: Safety monitor with expression parser
 
 **Files:**
 - Create: `src/robot/safety.rs`
 - Modify: `src/robot/mod.rs`
+- Modify: `src/robot/runtime.rs` (spawn safety task)
 
-- [ ] **Step 1: Create safety monitor**
+- [ ] **Step 1: Implement safety rule expression parser**
 
-Create `src/robot/safety.rs` — runs as a continuous Tokio task, reads world state every 100ms, evaluates safety rules from robot.toml, sends emergency actions if triggered.
+Parse expressions from robot.toml like `"front_distance < 10"` and `"battery < 15"`:
 
-Safety rule expression parser handles simple patterns: `sensor_name < value`, `sensor_name > value`.
+```rust
+pub struct ParsedRule {
+    pub name: String,
+    pub sensor_name: String,
+    pub operator: CompareOp,
+    pub threshold: f32,
+    pub action: SafetyAction,
+    pub priority: u8,
+}
 
-- [ ] **Step 2: Add tests and commit**
+pub enum CompareOp {
+    LessThan,
+    GreaterThan,
+    LessEqual,
+    GreaterEqual,
+}
+
+pub enum SafetyAction {
+    StopAll,
+    EmergencyStop,
+    Speak(String),
+}
+
+impl ParsedRule {
+    pub fn parse(config: &SafetyRuleConfig) -> Result<Self> {
+        // Parse "sensor_name < value" or "sensor_name > value"
+        // Split on whitespace, expect 3 parts
+        // ...
+    }
+
+    pub fn evaluate(&self, sensors: &HashMap<String, SensorValue>) -> bool {
+        if let Some(SensorValue::Distance(d) | SensorValue::Raw(d_raw)) = sensors.get(&self.sensor_name) {
+            // Compare against threshold
+        }
+        false
+    }
+}
+```
+
+- [ ] **Step 2: Implement SafetyMonitor**
+
+```rust
+pub struct SafetyMonitor {
+    rules: Vec<ParsedRule>,
+    world_rx: watch::Receiver<WorldState>,
+    action_tx: mpsc::Sender<ActionCommand>,
+}
+```
+
+Runs as continuous Tokio task:
+- Every 200ms (matches sensor poll rate), read world state
+- Evaluate all rules in priority order
+- If triggered, send action command (stop, e-stop, speak)
+- Log triggered rules
+
+- [ ] **Step 3: Wire into RobotRuntime::start()**
+- [ ] **Step 4: Add tests**
+
+Test: Set mock sensor to dangerous value → verify safety monitor sends stop command.
 
 ```
-git commit -m "Add safety monitor with declarative rule evaluation"
+git commit -m "Add safety monitor with declarative rule evaluation and expression parser"
 ```
 
 ---
 
 ## Phase 3c: Serial Bridge
 
-### Task 7: Serial bridge implementation
+### Task 7: Serial bridge + reference MCU firmware
 
 **Files:**
 - Create: `src/robot/bridge/serial.rs`
+- Create: `firmware/arduino/uniclaw_mcu/uniclaw_mcu.ino` (reference Arduino sketch)
 - Modify: `src/robot/bridge/mod.rs`
-- Modify: `Cargo.toml` (add `tokio-serial` dependency)
+- Modify: `Cargo.toml` (add `tokio-serial` dependency, feature-gated)
 
 - [ ] **Step 1: Implement serial protocol**
 
-Create `src/robot/bridge/serial.rs` implementing the binary protocol from the design spec (0xAA header, length, type, payload, CRC). Handles command sending and sensor response parsing.
+Binary protocol over UART:
+```
+Frame: [0xAA] [LEN:u16-LE] [SEQ:u8] [TYPE:u8] [PAYLOAD:...] [CRC8:u8]
+```
 
-- [ ] **Step 2: Add tests with mock serial port and commit**
+Command types, response types, CRC calculation as specified in design.
+
+Feature-gated: `#[cfg(feature = "serial")]`
+
+- [ ] **Step 2: Create reference Arduino sketch**
+
+Create `firmware/arduino/uniclaw_mcu/uniclaw_mcu.ino`:
+- Parse incoming serial frames
+- Respond to PING with PONG
+- Respond to SERVO_SET (log to serial monitor)
+- Respond to STATUS_REQUEST (return mock battery + sensor data)
+- Implement watchdog (stop servos if no heartbeat for 500ms)
+
+This is ~150 LOC of Arduino C. Not Rust, but essential for testing.
+
+- [ ] **Step 3: Add serial protocol unit tests** (encode/decode frames)
+- [ ] **Step 4: Commit**
 
 ```
-git commit -m "Add serial bridge for Arduino/ESP32 communication"
+git commit -m "Add serial bridge for Arduino/ESP32 and reference MCU firmware"
 ```
 
 ---
@@ -859,57 +550,105 @@ git commit -m "Add serial bridge for Arduino/ESP32 communication"
 
 **Files:**
 - Create: `src/robot/perception.rs`
-- Create: `src/robot/camera.rs` (feature-gated)
+- Create: `src/robot/camera.rs` (feature-gated behind `camera`)
 - Create: `src/tools/perception_tools.rs`
-- Modify: `Cargo.toml` (add `nokhwa` or `v4l2` dependency, feature-gated)
+- Modify: `src/tools/mod.rs`
+- Modify: `Cargo.toml` (add `nokhwa` dependency, feature-gated)
 
-- [ ] **Step 1: Create perception pipeline**
+**Prerequisite:** Task 0 (image support in LLM types) must be complete.
 
-Create `src/robot/perception.rs` — runs as Tokio task. Captures frames, detects motion (frame differencing), triggers cloud VLM calls on events/periodic timer. Updates world state with scene descriptions.
+- [ ] **Step 1: Create camera capture module**
 
-- [ ] **Step 2: Create camera capture module**
+`src/robot/camera.rs` behind `#[cfg(feature = "camera")]`:
+- Open camera device via `nokhwa`
+- Capture frame → encode as JPEG → return base64 string
+- Frame buffer: keep latest frame for on-demand capture
 
-Create `src/robot/camera.rs` behind `#[cfg(feature = "camera")]`. Uses `nokhwa` or `v4l2` crate for frame capture. Encodes to JPEG.
+- [ ] **Step 2: Create perception pipeline**
+
+`src/robot/perception.rs`:
+- Runs as Tokio task
+- Motion detection: compare current frame to previous (pixel difference, pure Rust with `image` crate)
+- VLM trigger: on motion detected (debounced) or periodic timer or agent request
+- VLM call: create `Message::user_with_image(prompt, base64, "image/jpeg")`, send through a dedicated LLM provider (from perception config)
+- Update world state with scene description
 
 - [ ] **Step 3: Create perception tools**
 
-Create `src/tools/perception_tools.rs` with tools: `take_photo` (capture + VLM describe), `describe_scene` (latest scene description from world state).
+`src/tools/perception_tools.rs`:
+- `take_photo`: capture frame → send to VLM → return description (uses image support from Task 0)
+- `describe_scene`: return latest scene description from world state (no new VLM call)
+- `check_motion`: return whether motion was recently detected
 
-- [ ] **Step 4: Add tests and commit**
+These tools need access to camera + VLM provider. Pass via ToolContext extension or capture in closure during registration.
+
+- [ ] **Step 4: Add tests** (mock camera returns test image, verify VLM message format)
+- [ ] **Step 5: Commit**
 
 ```
-git commit -m "Add perception pipeline with camera capture and cloud VLM"
+git commit -m "Add perception pipeline with camera capture and cloud VLM vision"
 ```
 
 ---
 
 ## Phase 3e: Voice Pipeline
 
-### Task 9: Voice activity detection + STT
+### Task 9: Voice input (STT) + voice output (cloud TTS)
 
 **Files:**
-- Create: `src/robot/voice.rs`
-- Modify: `Cargo.toml` (add `cpal` for audio capture, feature-gated)
+- Create: `src/robot/voice.rs` (feature-gated behind `voice`)
+- Modify: `Cargo.toml` (add `cpal` dependency, feature-gated)
+- Modify: `src/robot/runtime.rs` (spawn voice task)
+- Modify: `src/robot/action.rs` (Speak action uses cloud TTS)
 
-- [ ] **Step 1: Implement VAD + STT**
+**MVP approach:** Cloud STT (Whisper API) + Cloud TTS (OpenAI TTS or provider TTS). No local Piper for v1 — avoids `ort` dependency entirely. Add local TTS as future optimization.
 
-Create `src/robot/voice.rs` behind `#[cfg(feature = "voice")]`. Implements:
-- Audio capture via `cpal` crate
-- Energy-based VAD (voice activity detection)
-- Cloud STT via existing HTTP provider (Whisper API)
-- Detected speech → Input to agent worker
+- [ ] **Step 1: Audio capture + VAD**
 
-- [ ] **Step 2: Implement TTS**
+`src/robot/voice.rs`:
+- Audio capture via `cpal` (16kHz mono)
+- Energy-based VAD:
+  1. Compute RMS energy per 20ms frame
+  2. Adaptive noise floor (exponential moving average)
+  3. Speech start: energy > floor * 3.0 for > 300ms
+  4. Speech end: energy < floor * 1.5 for > 500ms
+  5. Record speech segment as WAV bytes
 
-Add TTS to voice.rs:
-- Text → Piper TTS (ONNX via `ort` crate) → WAV → speaker
-- Or fallback: text → cloud TTS API → audio → speaker
-- TTS cache (data/tts_cache/) for repeated phrases
+~80 LOC for VAD, ~50 LOC for cpal setup.
 
-- [ ] **Step 3: Add tests and commit**
+- [ ] **Step 2: Cloud STT (Whisper API)**
+
+Send recorded WAV to Whisper API (OpenAI endpoint):
+- POST to `https://api.openai.com/v1/audio/transcriptions`
+- Body: multipart form with audio file
+- Response: `{"text": "what the user said"}`
+- Convert to Input and send to agent_tx
+
+Use `reqwest` (already a dependency) for the HTTP call.
+
+- [ ] **Step 3: Cloud TTS (for Speak action)**
+
+When ActionExecutor receives `ActionCommand::Speak { text }`:
+- POST to TTS API (e.g., OpenAI `https://api.openai.com/v1/audio/speech`)
+- Response: audio bytes (mp3/wav)
+- Play via `cpal` output stream
+- Cache in `data/tts_cache/` (hash of text → audio file)
+
+Audio playback via `cpal`:
+- Open default output device
+- Write audio samples to output stream
+- ~50 LOC for playback
+
+- [ ] **Step 4: Wire into runtime**
+
+Voice task: continuous audio capture → VAD → STT → agent input
+Speak action: text → cloud TTS → cpal playback
+
+- [ ] **Step 5: Add tests** (mock audio input, verify STT called, verify TTS cached)
+- [ ] **Step 6: Commit**
 
 ```
-git commit -m "Add voice pipeline with VAD, cloud STT, and local TTS"
+git commit -m "Add voice pipeline with cloud STT (Whisper) and cloud TTS"
 ```
 
 ---
@@ -922,26 +661,37 @@ git commit -m "Add voice pipeline with VAD, cloud STT, and local TTS"
 - Create: `src/robot/bridge/ros2.rs`
 - Create: `src/tools/ros2_tools.rs`
 - Modify: `src/robot/bridge/mod.rs`
-- Modify: `Cargo.toml` (add `tokio-tungstenite` if not present)
+- Modify: `src/tools/mod.rs`
+- Modify: `Cargo.toml` (add `tokio-tungstenite` dependency)
 
 - [ ] **Step 1: Implement rosbridge WebSocket client**
 
-Create `src/robot/bridge/ros2.rs` — connects to rosbridge_server via WebSocket. Implements HardwareBridge trait by translating commands to ROS2 topic publishes and sensor reads to topic subscriptions.
+`src/robot/bridge/ros2.rs`:
+- Connect to rosbridge_server via WebSocket (`tokio-tungstenite`)
+- Implement `HardwareBridge` trait:
+  - `send_command(ServoSet)` → `{"op": "publish", "topic": "/servo_cmd", "msg": {"name": "...", "angle": ...}}`
+  - `send_command(MotorSet)` → `{"op": "publish", "topic": config.cmd_vel_topic, "msg": {"linear": {"x": speed}}}`
+  - `read_all_sensors()` → subscribe to sensor topics, maintain latest values
+  - `emergency_stop()` → publish to e-stop topic
+- Topic names from `robot.toml` `[hardware.ros2]` config
+- Automatic reconnection on disconnect
 
-The rosbridge JSON protocol:
-- Publish: `{"op": "publish", "topic": "/cmd_vel", "msg": {...}}`
-- Subscribe: `{"op": "subscribe", "topic": "/scan", "type": "..."}`
-- Service: `{"op": "call_service", "service": "/navigate_to_pose", "args": {...}}`
+~200 LOC.
 
 - [ ] **Step 2: Create ROS2 tools**
 
-Create `src/tools/ros2_tools.rs` with tools auto-registered when bridge = "ros2":
-- `navigate_to(x, y, theta)` — publish to navigate action
-- `get_position()` — read from odom topic
-- `ros2_publish(topic, msg)` — generic publish
-- `ros2_call_service(service, args)` — generic service call
+`src/tools/ros2_tools.rs` — auto-registered when `bridge = "ros2"`:
 
-- [ ] **Step 3: Add tests (mock WebSocket server) and commit**
+| Tool | What it does |
+|------|-------------|
+| `navigate_to(x, y, theta)` | Publish to navigate action (from config) |
+| `get_position()` | Read latest odom data from world state |
+| `get_map()` | Call map_server service |
+| `ros2_publish(topic, msg)` | Generic topic publish |
+| `ros2_call_service(service, args)` | Generic service call |
+
+- [ ] **Step 3: Add tests** (mock WebSocket server, verify protocol messages)
+- [ ] **Step 4: Commit**
 
 ```
 git commit -m "Add ROS2 bridge via rosbridge WebSocket for Gazebo and real hardware"
@@ -951,27 +701,45 @@ git commit -m "Add ROS2 bridge via rosbridge WebSocket for Gazebo and real hardw
 
 ## Verification
 
-### Task 11: Integration test + final verification
+### Task 11: Integration tests + final verification
 
 **Files:**
-- Modify: `tests/` (integration tests)
+- Create/modify: `tests/robot_test.rs`
 
 - [ ] **Step 1: Robot brain integration test**
 
-Test the full pipeline with MockBridge: load robot.toml → start runtime → send voice input → agent calls LLM → generates action → MockBridge logs command → verify.
+Full pipeline with MockBridge:
+1. Load robot.toml with servos + sensors
+2. Create runtime with MockBridge
+3. Start runtime
+4. Send text input "wave at me"
+5. Agent calls LLM → LLM calls `set_servo` tool → MockBridge logs command
+6. Verify MockBridge received `ServoSet` command
+7. Verify agent context includes robot description and world state
 
-- [ ] **Step 2: Run full test suite**
+- [ ] **Step 2: Safety monitor test**
+
+1. Load robot.toml with safety rule "front_distance < 10"
+2. Set mock sensor front_distance to 5
+3. Verify safety monitor sends Stop action
+
+- [ ] **Step 3: Image message test**
+
+1. Create Message::user_with_image with test base64 data
+2. Serialize through each provider (Anthropic, OpenAI, Gemini)
+3. Verify correct image encoding in output JSON
+
+- [ ] **Step 4: Run full test suite**
 
 ```bash
 cargo test
 cargo test --features telegram
-cargo test --features camera
-cargo test --features voice
+cargo test --features camera,voice
 cargo clippy -- -D warnings
 cargo fmt -- --check
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```
 git commit -m "Add robot brain integration tests and verify all features"
@@ -981,20 +749,87 @@ git commit -m "Add robot brain integration tests and verify all features"
 
 ## Summary
 
-| Task | Phase | Files | What |
-|------|-------|-------|------|
-| 1 | 3a | robot/bridge/ | HardwareBridge trait + MockBridge |
-| 2 | 3a | robot/description.rs | robot.toml parser |
-| 3 | 3a | robot/world_state.rs, runtime.rs, main.rs, context.rs | World state + runtime + CLI + context injection |
-| 4 | 3b | robot/action.rs | Action types + executor |
-| 5 | 3b | tools/robot_actions.rs | LLM-facing robot tools |
-| 6 | 3b | robot/safety.rs | Safety monitor |
-| 7 | 3c | robot/bridge/serial.rs | Serial protocol to MCU |
-| 8 | 3d | robot/perception.rs, camera.rs, tools/ | Camera + VLM perception |
-| 9 | 3e | robot/voice.rs | VAD + STT + TTS |
-| 10 | 4 | robot/bridge/ros2.rs, tools/ | ROS2 via rosbridge → Gazebo/real HW |
-| 11 | — | tests/ | Integration tests + verification |
+| Task | Phase | What | New Deps | Est. LOC |
+|------|-------|------|----------|----------|
+| **0** | Pre | Image support in LLM types + 3 providers | — | ~150 |
+| **1** | 3a | HardwareBridge trait + MockBridge | — | ~150 |
+| **2** | 3a | robot.toml parser | — | ~300 |
+| **3** | 3a | World state + runtime + CLI + ToolContext + context injection | — | ~400 |
+| **4** | 3b | Action types + executor | — | ~200 |
+| **5** | 3b | Robot action tools (set_servo, say, get_sensor, etc.) | — | ~250 |
+| **6** | 3b | Safety monitor + expression parser | — | ~200 |
+| **7** | 3c | Serial bridge + reference Arduino sketch | tokio-serial (feature) | ~300 |
+| **8** | 3d | Perception pipeline + camera + VLM | nokhwa (feature) | ~300 |
+| **9** | 3e | Voice: cloud STT + cloud TTS + VAD + audio I/O | cpal (feature) | ~350 |
+| **10** | 4 | ROS2 bridge + ROS2 tools | tokio-tungstenite | ~300 |
+| **11** | — | Integration tests + verification | — | ~200 |
+| | | **Total** | | **~3,100** |
 
-**Estimated new code**: ~3,000-4,000 LOC
-**New dependencies**: tokio-serial, cpal, ort, nokhwa (all feature-gated)
-**Total after**: ~13,000-14,000 LOC
+### Dependency Summary
+
+| Crate | Feature Gate | Used By | Size Impact |
+|-------|-------------|---------|------------|
+| `tokio-serial` | `serial` | Serial bridge (Task 7) | ~50KB |
+| `nokhwa` | `camera` | Camera capture (Task 8) | ~200KB (depends on v4l2) |
+| `cpal` | `voice` | Audio capture + playback (Task 9) | ~100KB (depends on ALSA) |
+| `tokio-tungstenite` | `ros2` | ROS2 bridge (Task 10) | ~80KB |
+| `image` | — (already optional) | Motion detection (Task 8) | May already be present |
+
+No `ort` (ONNX Runtime) dependency in this phase. Local TTS (Piper) deferred to future phase.
+
+### Task Dependencies
+
+```
+Task 0 (image support) ←── Task 8 (perception needs images)
+
+Task 1 (bridge trait) ←── Task 4 (executor uses bridge)
+                       ←── Task 7 (serial implements bridge)
+                       ←── Task 10 (ros2 implements bridge)
+
+Task 2 (robot.toml) ←── Task 3 (runtime loads description)
+                     ←── Task 5 (tools auto-register from description)
+                     ←── Task 6 (safety rules from description)
+
+Task 3 (runtime + ToolContext) ←── Task 4 (executor wired into runtime)
+                                ←── Task 5 (tools use ToolContext.action_tx)
+                                ←── Task 6 (safety wired into runtime)
+
+Task 4 (action executor) ←── Task 5 (tools send ActionCommands)
+                          ←── Task 9 (Speak action plays audio)
+
+Tasks 0-6 are the core. Tasks 7-10 are independent extensions. Task 11 is final.
+```
+
+### Communication Architecture (Simplified from v1)
+
+```
+                     ┌─────────────────────┐
+                     │   World State        │
+                     │   (watch channel)    │
+                     │   1 writer, N readers│
+                     └────────┬────────────┘
+                              │
+        writes ───────────────┤ reads
+        │                     │                │
+   Sensor Polling       Safety Monitor    Context Builder
+   (200ms interval)     (200ms interval)  (per agent turn)
+
+                     ┌─────────────────────┐
+                     │   Action Channel     │
+                     │   (mpsc)             │
+                     └────────┬────────────┘
+                              │
+   Robot Tools ──sends──→     │ ──receives──→ Action Executor ──→ Bridge
+   Safety Monitor ──sends──→  │
+
+                     ┌─────────────────────┐
+                     │   Agent Channel      │
+                     │   (mpsc, existing)   │
+                     └────────┬────────────┘
+                              │
+   Voice (STT) ──sends──→    │
+   HTTP/MQTT ──sends──→      │ ──receives──→ Agent Worker
+   Perception events ──sends──→│
+```
+
+Three channels. Clean. No over-engineering.
