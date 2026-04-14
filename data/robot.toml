@@ -1,0 +1,71 @@
+[robot]
+name = "Buddy"
+type = "desktop_companion"
+description = "A small desktop companion robot with camera, arms, and speaker"
+
+[body]
+base = "fixed"
+weight_kg = 0.5
+height_cm = 20
+
+[[sensors]]
+name = "camera"
+type = "camera"
+device = "/dev/video0"
+
+[[sensors]]
+name = "front_distance"
+type = "ultrasonic"
+pin = 7
+max_range_cm = 200
+
+[[actuators]]
+name = "left_arm"
+type = "servo"
+pin = 12
+angle_range = [0, 180]
+default_angle = 90
+
+[[actuators]]
+name = "right_arm"
+type = "servo"
+pin = 13
+angle_range = [0, 180]
+default_angle = 90
+
+[[actuators]]
+name = "head_pan"
+type = "servo"
+pin = 14
+angle_range = [-45, 45]
+
+[[actuators]]
+name = "speaker"
+type = "audio_output"
+
+[[actuators]]
+name = "led_ring"
+type = "neopixel"
+pin = 18
+count = 12
+
+[safety]
+watchdog_timeout_ms = 500
+
+[[safety.rules]]
+name = "obstacle_stop"
+condition = "front_distance < 10"
+action = "stop_all_motors"
+priority = 10
+
+[perception]
+vision_provider = "gemini"
+vision_model = "gemini-2.0-flash"
+motion_detection = true
+
+[voice]
+stt_provider = "whisper"
+tts_engine = "cloud"
+
+[hardware]
+bridge = "mock"
