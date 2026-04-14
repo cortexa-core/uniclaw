@@ -34,10 +34,7 @@ impl MockBridge {
     /// Set a sensor value that will be returned by `read_sensor` / `read_all_sensors`.
     #[allow(dead_code)]
     pub fn set_sensor(&self, name: &str, value: SensorValue) {
-        self.sensors
-            .lock()
-            .unwrap()
-            .insert(name.to_string(), value);
+        self.sensors.lock().unwrap().insert(name.to_string(), value);
     }
 
     /// Get a copy of all logged commands.
@@ -136,11 +133,14 @@ mod tests {
         assert!(matches!(dist, SensorValue::Distance(d) if (d - 100.0).abs() < f32::EPSILON));
 
         // Custom sensor
-        bridge.set_sensor("gyro", SensorValue::Orientation {
-            roll: 1.0,
-            pitch: 2.0,
-            yaw: 3.0,
-        });
+        bridge.set_sensor(
+            "gyro",
+            SensorValue::Orientation {
+                roll: 1.0,
+                pitch: 2.0,
+                yaw: 3.0,
+            },
+        );
         let gyro = bridge.read_sensor("gyro").await.unwrap();
         assert!(matches!(gyro, SensorValue::Orientation { .. }));
 

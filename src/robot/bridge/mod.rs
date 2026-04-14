@@ -38,11 +38,7 @@ pub enum HardwareCommand {
 pub enum SensorValue {
     Distance(f32),
     Temperature(f32),
-    Orientation {
-        roll: f32,
-        pitch: f32,
-        yaw: f32,
-    },
+    Orientation { roll: f32, pitch: f32, yaw: f32 },
     Boolean(bool),
     Raw(i32),
 }

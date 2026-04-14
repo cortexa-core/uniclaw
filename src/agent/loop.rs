@@ -143,7 +143,8 @@ impl Agent {
         robot_prompt: String,
         world_rx: tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>,
     ) {
-        self.context_builder.set_robot_context(robot_prompt, world_rx);
+        self.context_builder
+            .set_robot_context(robot_prompt, world_rx);
     }
 
     /// Run session garbage collection using config limits.

@@ -410,9 +410,7 @@ mod tests {
     async fn test_say_tool() {
         let ctx = test_ctx_no_robot();
         let tool = SayTool;
-        let result = tool
-            .execute(json!({"text": "Hello world"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"text": "Hello world"}), &ctx).await;
         assert!(!result.is_error());
         assert_eq!(result.content(), "Said: Hello world");
     }
@@ -437,9 +435,7 @@ mod tests {
                 .insert("distance".to_string(), SensorValue::Distance(42.5));
         });
         let tool = GetSensorTool;
-        let result = tool
-            .execute(json!({"name": "distance"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"name": "distance"}), &ctx).await;
         assert!(!result.is_error());
         assert!(result.content().contains("42.5"));
     }
@@ -448,9 +444,7 @@ mod tests {
     async fn test_get_sensor_unknown() {
         let (ctx, _rx, _world_tx) = test_ctx_with_channels();
         let tool = GetSensorTool;
-        let result = tool
-            .execute(json!({"name": "nonexistent"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"name": "nonexistent"}), &ctx).await;
         assert!(result.is_error());
         assert!(result.content().contains("Unknown sensor"));
     }

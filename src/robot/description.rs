@@ -339,10 +339,7 @@ baud = 115200
         assert_eq!(safety.rules[0].name, "obstacle_stop");
 
         let perception = desc.perception.as_ref().unwrap();
-        assert_eq!(
-            perception.vision_provider.as_deref(),
-            Some("gemini")
-        );
+        assert_eq!(perception.vision_provider.as_deref(), Some("gemini"));
         assert_eq!(perception.motion_detection, Some(true));
 
         let voice = desc.voice.as_ref().unwrap();

@@ -226,7 +226,11 @@ bridge = "mock"
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let log = mock2.logged_commands();
-        assert!(log.len() >= 2, "expected at least 2 commands, got {}", log.len());
+        assert!(
+            log.len() >= 2,
+            "expected at least 2 commands, got {}",
+            log.len()
+        );
         assert!(matches!(log[0], HardwareCommand::Ping));
 
         drop(shared_bridge);
