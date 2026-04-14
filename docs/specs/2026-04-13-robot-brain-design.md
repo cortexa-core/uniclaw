@@ -796,12 +796,17 @@ src/
     description.rs            # robot.toml parser
     world_state.rs            # WorldState struct + watch channel
     perception.rs             # Perception pipeline
-    camera.rs                 # Camera capture (v4l2)
+    camera.rs                 # Camera capture (v4l2, feature-gated)
     action.rs                 # Action types + executor
     safety.rs                 # Safety monitor + rule evaluator
     behavior.rs               # Behavior system
-    hardware_bridge.rs        # Serial protocol to MCU
     voice.rs                  # STT + TTS + VAD
+    bridge/
+      mod.rs                  # HardwareBridge trait
+      mock.rs                 # MockBridge (development, logging)
+      serial.rs               # SerialBridge (Arduino/ESP32 via UART)
+      ros2.rs                 # RosBridge (rosbridge WebSocket → Gazebo/real HW)
+      mujoco.rs               # MuJoCoBridge (future)
 
   server/                     # HTTP + MQTT (existing)
   channels/                   # Telegram etc. (existing)
@@ -831,56 +836,168 @@ Agent core, 40+ providers, streaming, memory, tools, server, hardening.
 
 ### Phase 3: Robot Brain Foundation (4-6 weeks)
 
-**3a: Robot Description + Runtime Shell (1 week)**
+**3a: Robot Description + Runtime + Mock Bridge (1 week)**
 - `robot.toml` parser and validation
+- HardwareBridge trait with MockBridge implementation
 - Robot runtime task skeleton (start/stop)
 - World state with watch channel
 - Inject robot description into agent context
 - New CLI command: `uniclaw robot` (starts robot mode)
 
-**3b: Hardware Bridge (1 week)**
-- Serial protocol implementation
+**3b: Action System + Safety (1 week)**
+- Action types (ActionCommand enum) and executor task
+- Robot action tools (move, look, wave, say, set_led, etc.)
+- Auto-registration based on robot.toml capabilities
+- Safety monitor with declarative rule evaluation
+
+**3c: Serial Bridge (1 week)**
+- Binary serial protocol implementation
 - MCU communication (send commands, receive sensor data)
-- Watchdog timer
-- Mock backend for development
+- Watchdog timer and heartbeat
 - Sensor data → world state updates
 
-**3c: Action System (1 week)**
-- Action types and executor
-- Robot action tools (move, look, wave, say, etc.)
-- Auto-registration based on robot.toml capabilities
-- Safety monitor with rule evaluation
-
-**3d: Perception + Voice (1-2 weeks)**
+**3d: Perception + Vision (1 week)**
 - Camera capture (v4l2/nokhwa, feature-gated)
 - Motion detection (frame differencing)
 - Cloud VLM integration (frame → base64 → vision provider)
-- Perception event triggers
-- VAD + cloud STT (Whisper)
-- Local TTS (Piper via ONNX)
-- World state integration
+- Perception event triggers → world state
 
-### Phase 4: Behaviors + Spatial Memory (2 weeks)
-- Behavior file parser
+**3e: Voice Pipeline (1 week)**
+- VAD (voice activity detection, energy-based)
+- Cloud STT (Whisper API)
+- Local TTS (Piper via ONNX)
+- Audio capture + playback (cpal crate)
+
+### Phase 4: ROS2 + Simulation (2 weeks)
+- RosBridge (rosbridge WebSocket, ~200 LOC)
+- ROS2 tools (navigate_to, get_map, ros2_publish, etc.)
+- Gazebo integration (via rosbridge — same config for sim and real)
+- Web dashboard: 3D robot viewer, sensor panel, action log
+
+### Phase 5: Behaviors + Spatial Memory (2 weeks)
+- Behavior file parser (TOML-based behavior sequences)
 - Behavior evaluator (event → behavior → action sequence)
 - Spatial memory tools (remember_location, where_is)
 - Idle behaviors, greeting, attention
 
-### Phase 5: Local CV (2 weeks, future)
+### Phase 6: Local CV + Advanced (future)
 - ONNX Runtime integration (feature-gated)
 - YOLO-nano for object detection
 - Face detection + recognition
-- Continuous perception pipeline
-
-### Phase 6: Advanced (future)
-- ROS2 bridge
+- MuJoCo WASM bridge (in-browser physics)
 - Fleet management (multiple robots via MQTT)
 - OTA updates
-- Local VLM for offline understanding
 
 ---
 
-## 18. What We Keep vs What Changes
+## 18. Simulation & ROS2 Integration
+
+### Design Principle
+
+**UniClaw is the brain, not the body.** Don't build a physics engine. Integrate with existing simulators via the HardwareBridge trait. The same brain code runs against real hardware, Gazebo, MuJoCo, or a mock — config-only switch.
+
+### HardwareBridge Trait (The Abstraction)
+
+```rust
+#[async_trait]
+pub trait HardwareBridge: Send + Sync {
+    async fn send_command(&self, cmd: HardwareCommand) -> Result<()>;
+    async fn read_sensor(&self, sensor_id: &str) -> Result<SensorValue>;
+    async fn read_all_sensors(&self) -> Result<HashMap<String, SensorValue>>;
+    async fn heartbeat(&self) -> Result<()>;
+    async fn emergency_stop(&self) -> Result<()>;
+    fn name(&self) -> &str;
+}
+```
+
+Four implementations:
+
+| Bridge | Config | Use Case |
+|--------|--------|----------|
+| `MockBridge` | `bridge = "mock"` | Development, unit tests, logs everything |
+| `SerialBridge` | `bridge = "serial"` | Real hardware (Arduino/ESP32/STM32) |
+| `RosBridge` | `bridge = "ros2"` | ROS2 via rosbridge WebSocket → Gazebo, Isaac, real HW |
+| `MuJoCoBridge` | `bridge = "mujoco"` | MuJoCo standalone or WASM (future) |
+
+### ROS2 Integration via rosbridge
+
+`rosbridge_suite` is a standard ROS2 package exposing all topics/services via WebSocket + JSON. UniClaw connects as a WebSocket client (~200 LOC). No ROS2 dependency in the UniClaw binary.
+
+Protocol:
+```json
+{"op": "publish", "topic": "/cmd_vel", "msg": {"linear": {"x": 0.5}}}
+{"op": "subscribe", "topic": "/scan", "type": "sensor_msgs/LaserScan"}
+{"op": "call_service", "service": "/navigate_to_pose", "args": {...}}
+```
+
+**Boundary**: UniClaw decides WHAT to do (intent, reasoning). ROS2 handles HOW (path planning, kinematics, PID control).
+
+| UniClaw (WHAT) | ROS2 (HOW) |
+|---|---|
+| "Go to the kitchen" | Nav2 path planning + obstacle avoidance |
+| "Pick up the red cup" | MoveIt2 motion planning + grasp |
+| "What's around me?" | SLAM, sensor fusion |
+
+### Simulation Tiers
+
+**Tier 1: Mock** — Logs commands, returns synthetic sensor data. For brain logic development.
+
+**Tier 2: Gazebo via ROS2** — Full physics for any robot (rover, arm, companion, drone). Standard. Uses rosbridge — same config for simulation and real hardware.
+
+**Tier 3: MuJoCo (WASM or standalone)** — Best physics for manipulation and locomotion. Has browser-native WASM build. Future phase.
+
+**Tier 4: NVIDIA Isaac Sim** — Photorealistic, GPU-required. Connects via ROS2 (same rosbridge). No UniClaw-specific code needed.
+
+### Configuration: Sim vs Real is Config-Only
+
+```toml
+# Development (no hardware)
+[hardware]
+bridge = "mock"
+
+# Simulation (Gazebo)
+[hardware]
+bridge = "ros2"
+[hardware.ros2]
+url = "ws://localhost:9090"
+
+# Real hardware (same config as Gazebo!)
+[hardware]
+bridge = "ros2"
+[hardware.ros2]
+url = "ws://192.168.1.50:9090"  # Only URL changes
+
+# Direct serial (simple robots, no ROS2)
+[hardware]
+bridge = "serial"
+port = "/dev/ttyUSB0"
+baud_rate = 115200
+```
+
+### Web Dashboard (Not a Simulator)
+
+The UniClaw web UI provides a visualization dashboard, not a physics engine:
+- 3D robot viewer (urdf-loaders + Three.js or MuJoCo WASM renderer)
+- Real-time sensor display
+- Camera feed (from sim or real camera)
+- Action log and manual controls
+- Chat/voice interface
+
+This works with ANY backend — real hardware, Gazebo, MuJoCo, or mock.
+
+### ROS2 Tools (Registered When bridge = "ros2")
+
+| Tool | ROS2 Mapping |
+|------|-------------|
+| `navigate_to(x, y, theta)` | Publish to `/navigate_to_pose` action |
+| `get_map()` | Call `/map_server/get_map` service |
+| `get_position()` | Subscribe to `/odom` topic |
+| `ros2_publish(topic, msg)` | Generic publish |
+| `ros2_call_service(service, args)` | Generic service call |
+
+---
+
+## 19. What We Keep vs What Changes
 
 | Component | Status | Changes for Robot Brain |
 |-----------|--------|----------------------|
