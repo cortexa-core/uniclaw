@@ -1,4 +1,4 @@
-# Robot Brain Foundation — Implementation Plan (v2)
+# Robot Brain Foundation — Implementation Plan (v3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,13 +8,17 @@
 
 **Tech Stack:** Rust, Tokio, serde, tokio-serial, cpal (audio), tokio-tungstenite (ROS2 bridge)
 
-**Review fixes applied (v2):** Added Task 0 (image support), extended ToolContext with action/world channels, simplified channel architecture (3 channels not 6), added safety rule expression parser detail, switched to cloud TTS for MVP (no ort/Piper dependency), added reference MCU firmware, added audio playback via cpal.
+**v3 changes:** Added explicit Foundation Pre-Work phase (Tasks F1-F3) separating existing code changes from new robot modules. Extracted main.rs refactor into its own task. All foundational changes are additive (optional fields, new enum variants) — zero breaking changes to existing chat/serve modes.
 
 ---
 
-## Prerequisites
+## Foundation Pre-Work: Changes to Existing Code
 
-### Task 0: Add image support to LLM message types and providers
+These tasks modify existing UniClaw files to support the robot brain. All changes are additive — existing chat mode, serve mode, and all tests continue to work unchanged.
+
+**Total: ~215 LOC changed across 7 existing files.**
+
+### Task F1: Add image support to LLM message types and providers
 
 **Why this is first:** The perception pipeline (Task 8) needs to send camera frames to vision LLMs. The current `MessageContent` enum has no image variant. Without this, `take_photo` can't work.
 
@@ -166,6 +170,217 @@ git commit -m "Add image support to LLM message types for vision-capable provide
 
 ---
 
+### Task F2: Extend ToolContext, Agent, and ContextBuilder with robot support
+
+**Why:** Robot tools need to send hardware commands and read world state. The agent needs to inject robot context into the LLM prompt. All changes are optional fields — `None` in non-robot mode.
+
+**Files:**
+- Modify: `src/tools/registry.rs` (ToolContext)
+- Modify: `src/agent/loop.rs` (Agent struct + process_inner)
+- Modify: `src/agent/context.rs` (ContextBuilder)
+- Modify: `src/lib.rs` (add `pub mod robot;`)
+
+- [ ] **Step 1: Extend ToolContext**
+
+In `src/tools/registry.rs`, add optional robot fields:
+
+```rust
+pub struct ToolContext {
+    pub data_dir: PathBuf,
+    pub session_id: String,
+    pub config: Arc<Config>,
+    /// For robot tools: send action commands to hardware bridge (None in chat mode)
+    pub action_tx: Option<tokio::sync::mpsc::Sender<crate::robot::bridge::HardwareCommand>>,
+    /// For robot tools: read current world state (None in chat mode)
+    pub world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
+}
+```
+
+Note: This creates a dependency on `src/robot/` types. Since `src/robot/` doesn't exist yet, use forward-declared types or make these generic. The simplest approach: create `src/robot/mod.rs` with just the type stubs (empty structs) in this task, then flesh them out in Task 1.
+
+Alternative (simpler, no forward dependency): Use type-erased channels:
+
+```rust
+pub struct ToolContext {
+    pub data_dir: PathBuf,
+    pub session_id: String,
+    pub config: Arc<Config>,
+    /// Extension point for robot tools. Holds action sender + world state receiver.
+    pub robot: Option<Arc<dyn std::any::Any + Send + Sync>>,
+}
+```
+
+This avoids the circular dependency entirely. Robot tools downcast to the concrete type.
+
+**Recommended approach:** Create the `src/robot/` module stub first (just types), then use concrete types. Cleaner than Any.
+
+- [ ] **Step 2: Create robot module stubs**
+
+Create `src/robot/mod.rs`:
+```rust
+pub mod bridge;
+pub mod world_state;
+```
+
+Create `src/robot/bridge/mod.rs` with just the `HardwareCommand` enum (no trait yet — that's Task 1).
+
+Create `src/robot/world_state.rs` with just the `WorldState` struct (no methods yet — that's Task 3).
+
+Add `pub mod robot;` to `src/lib.rs`.
+
+This gives us the types that ToolContext needs without building the full modules.
+
+- [ ] **Step 3: Extend Agent struct**
+
+In `src/agent/loop.rs`, add optional robot fields to `Agent`:
+
+```rust
+pub struct Agent {
+    llm: Box<dyn LlmProvider>,
+    pub tool_registry: ToolRegistry,
+    pub memory: MemoryManager,
+    pub session_store: SessionStore,
+    context_builder: ContextBuilder,
+    config: AgentConfig,
+    data_dir: PathBuf,
+    full_config: Arc<Config>,
+    // Robot mode (None in chat/serve mode)
+    action_tx: Option<tokio::sync::mpsc::Sender<crate::robot::bridge::HardwareCommand>>,
+    world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
+}
+```
+
+Update `Agent::new()` to accept optional robot params (default None). Update `process_inner()` to pass them into ToolContext:
+
+```rust
+let ctx = ToolContext {
+    data_dir: self.data_dir.clone(),
+    session_id: input.session_id.clone(),
+    config: self.full_config.clone(),
+    action_tx: self.action_tx.clone(),
+    world_rx: self.world_rx.clone(),
+};
+```
+
+- [ ] **Step 4: Extend ContextBuilder**
+
+In `src/agent/context.rs`, add optional robot context:
+
+```rust
+pub struct ContextBuilder {
+    // ... existing fields ...
+    robot_prompt: Option<String>,
+    world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
+}
+```
+
+Add setter:
+```rust
+pub fn set_robot_context(
+    &mut self,
+    robot_prompt: String,
+    world_rx: tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>,
+) {
+    self.robot_prompt = Some(robot_prompt);
+    self.world_rx = Some(world_rx);
+}
+```
+
+In `build_system_prompt()`, after the skills section, append robot context if present:
+```rust
+if let Some(ref prompt) = self.robot_prompt {
+    parts.push(prompt.clone());
+}
+if let Some(ref rx) = self.world_rx {
+    parts.push(rx.borrow().to_context_section());
+}
+```
+
+Initialize both as `None` in `ContextBuilder::new()`.
+
+- [ ] **Step 5: Update all existing ToolContext and Agent construction sites**
+
+Add `action_tx: None, world_rx: None` to:
+- `src/agent/loop.rs` (ToolContext in process_inner)
+- `src/main.rs` (Agent::new calls)
+- `tests/agent_test.rs` (test agent construction)
+
+Add `robot_prompt: None, world_rx: None` to ContextBuilder::new() initialization.
+
+- [ ] **Step 6: Run tests — all existing tests must pass unchanged**
+
+```bash
+cargo test
+cargo test --features telegram
+```
+
+- [ ] **Step 7: Commit**
+
+```
+git commit -m "Extend ToolContext, Agent, and ContextBuilder with optional robot support fields"
+```
+
+---
+
+### Task F3: Extract CLI commands from main.rs
+
+**Why:** main.rs is 492 LOC and will grow with `run_robot()`. Extract command handlers to keep main.rs lean.
+
+**Files:**
+- Create: `src/commands/mod.rs`
+- Create: `src/commands/chat.rs`
+- Create: `src/commands/serve.rs`
+- Modify: `src/main.rs` (keep CLI parsing + delegation only)
+- Modify: `src/lib.rs` (add `pub mod commands;`)
+
+- [ ] **Step 1: Create commands module**
+
+Create `src/commands/mod.rs`:
+```rust
+pub mod chat;
+pub mod serve;
+```
+
+- [ ] **Step 2: Extract run_chat() to commands/chat.rs**
+
+Move `run_chat()`, `send_and_wait()`, `atty_check()` from main.rs to `src/commands/chat.rs`. Export as `pub async fn run_chat(...)`.
+
+- [ ] **Step 3: Extract run_serve() to commands/serve.rs**
+
+Move `run_serve()` from main.rs to `src/commands/serve.rs`. Export as `pub async fn run_serve(...)`.
+
+- [ ] **Step 4: Move shared helpers**
+
+Move `setup_logging()`, `create_agent()`, `spawn_agent_worker()` to `src/commands/mod.rs` as shared helpers.
+
+- [ ] **Step 5: Slim down main.rs**
+
+main.rs should be ~60 LOC: CLI struct, Commands enum, and `main()` that delegates to `commands::chat::run_chat()`, `commands::serve::run_serve()`, etc.
+
+```rust
+mod commands;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Init => commands::run_init(&cli.config, &cli.data_dir),
+        Commands::Chat { message, session } => {
+            commands::chat::run_chat(&cli.config, &cli.data_dir, message, &session).await
+        }
+        Commands::Serve => commands::serve::run_serve(&cli.config, &cli.data_dir).await,
+    }
+}
+```
+
+- [ ] **Step 6: Run tests and commit**
+
+```
+git commit -m "Extract CLI commands from main.rs into src/commands/ modules"
+```
+
+---
+
 ## Phase 3a: Robot Description + Runtime + Mock Bridge
 
 ### Task 1: HardwareBridge trait and MockBridge
@@ -210,94 +425,63 @@ git commit -m "Add robot description parser for robot.toml"
 
 ---
 
-### Task 3: World state, runtime, CLI, ToolContext extension, context injection
+### Task 3: World state, runtime, and Robot CLI command
+
+**Prerequisites:** Tasks F1, F2, F3 (foundational changes complete).
 
 **Files:**
-- Create: `src/robot/world_state.rs`
+- Modify: `src/robot/world_state.rs` (flesh out from stub)
 - Create: `src/robot/runtime.rs`
 - Modify: `src/robot/mod.rs`
-- Modify: `src/main.rs` (add `Robot` subcommand + `run_robot()`)
-- Modify: `src/agent/context.rs` (add robot_prompt + world_rx)
-- Modify: `src/tools/registry.rs` (extend ToolContext)
+- Create: `src/commands/robot.rs`
+- Modify: `src/commands/mod.rs`
+- Modify: `src/main.rs` (add `Robot` variant to Commands enum)
 
-This is the largest task — it wires the robot runtime into the existing agent.
+This task fleshes out the world state and runtime from the stubs created in F2, and adds the `uniclaw robot` CLI command.
 
-- [ ] **Step 1: Create WorldState** (`src/robot/world_state.rs`)
+- [ ] **Step 1: Flesh out WorldState** (`src/robot/world_state.rs`)
 
-As specified in v1, with `to_context_section()` for LLM prompt injection.
+Expand the stub from Task F2 with full fields (sensors, scene_description, actuator_positions, battery, etc.) and `to_context_section()` method that formats the state for the LLM prompt. As specified in v1 design.
 
 - [ ] **Step 2: Create RobotRuntime** (`src/robot/runtime.rs`)
 
-As specified in v1. Spawns sensor polling task, manages watch channel.
+The main orchestrator. Spawns sensor polling task, manages watch channel.
 
-Simplification from v1: Only 3 channels:
+```rust
+pub struct RobotRuntime {
+    description: Arc<RobotDescription>,
+    bridge: Arc<dyn HardwareBridge>,
+    world_tx: watch::Sender<WorldState>,
+    world_rx: watch::Receiver<WorldState>,
+}
+```
+
+Key methods:
+- `new(description, bridge)` — create runtime with watch channel
+- `world_rx()` — clone receiver for other components
+- `bridge()` — Arc reference for action executor
+- `start()` — spawn sensor polling task (reads bridge every 200ms, writes to world_tx)
+
+Three channels only:
 - `world_tx/rx` (watch) — sensor data + perception state
-- `action_tx/rx` (mpsc) — agent → hardware bridge
+- `action_tx/rx` (mpsc) — agent → hardware bridge (created here, passed to tools)
 - `agent_tx/rx` (mpsc) — existing, voice/text/events → agent
 
-Remove the 3 extra channels from the original design (event_tx, hw_tx, sensor_tx). The runtime writes sensors directly to world_tx. The action executor calls bridge methods directly.
+- [ ] **Step 3: Create `commands/robot.rs`**
 
-- [ ] **Step 3: Extend ToolContext with robot capabilities**
+Create `src/commands/robot.rs` with `run_robot()`:
+1. Load config + robot.toml (RobotDescription::load)
+2. Create bridge (match on robot.toml hardware.bridge: "mock" → MockBridge, "serial" → future)
+3. Create RobotRuntime
+4. Create agent with robot context:
+   - Call `context_builder.set_robot_context(description.to_system_prompt(), runtime.world_rx())`
+   - Pass `action_tx` and `world_rx` into Agent::new() for ToolContext
+5. Spawn agent worker
+6. Start runtime tasks
+7. If `message` provided: single-shot mode. Otherwise: REPL.
+8. Wait for Ctrl+C
 
-In `src/tools/registry.rs`, add optional robot fields:
-
-```rust
-pub struct ToolContext {
-    pub data_dir: PathBuf,
-    pub session_id: String,
-    pub config: Arc<Config>,
-    /// For robot tools: send action commands to the hardware bridge
-    pub action_tx: Option<tokio::sync::mpsc::Sender<super::robot::bridge::HardwareCommand>>,
-    /// For robot tools: read current world state
-    pub world_rx: Option<tokio::sync::watch::Receiver<super::robot::world_state::WorldState>>,
-}
-```
-
-Update ALL places that construct ToolContext to add `action_tx: None, world_rx: None`. These are:
-- `src/agent/loop.rs` (process_inner, where ToolContext is built for tool execution)
-
-In robot mode, these fields are set to `Some(...)`.
-
-- [ ] **Step 4: Inject robot context into ContextBuilder**
-
-In `src/agent/context.rs`, add optional fields:
-
-```rust
-pub struct ContextBuilder {
-    // ... existing fields ...
-    robot_prompt: Option<String>,
-    world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
-}
-```
-
-Add setter methods:
-```rust
-pub fn set_robot_context(
-    &mut self,
-    robot_prompt: String,
-    world_rx: tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>,
-) {
-    self.robot_prompt = Some(robot_prompt);
-    self.world_rx = Some(world_rx);
-}
-```
-
-In `build_system_prompt()`, after skills section, append:
-```rust
-if let Some(ref prompt) = self.robot_prompt {
-    parts.push(prompt.clone());
-}
-if let Some(ref rx) = self.world_rx {
-    parts.push(rx.borrow().to_context_section());
-}
-```
-
-Initialize `robot_prompt: None, world_rx: None` in `ContextBuilder::new()`.
-
-- [ ] **Step 5: Add `Robot` CLI subcommand**
-
-In `src/main.rs`, add to `Commands` enum:
-
+Add `Robot` variant to `Commands` enum in main.rs:
 ```rust
     Robot {
         #[arg(long, default_value = "data/robot.toml")]
@@ -307,22 +491,16 @@ In `src/main.rs`, add to `Commands` enum:
     },
 ```
 
-Add `run_robot()` function:
-1. Load config + robot.toml
-2. Create bridge (mock/serial based on robot.toml)
-3. Create RobotRuntime
-4. Create agent with robot context injected
-5. Spawn agent worker with action_tx and world_rx in ToolContext
-6. Start runtime tasks
-7. If `message` provided: single-shot mode. Otherwise: REPL (like chat).
-8. Wait for Ctrl+C
+Register in `src/commands/mod.rs`: `pub mod robot;`
 
-- [ ] **Step 6: Add tests and commit**
+- [ ] **Step 4: Add tests**
 
-Test: Load robot.toml → create runtime with MockBridge → verify world state updates → verify context includes robot description.
+Test: Load robot.toml → create runtime with MockBridge → verify world state updates with sensor data → verify `to_context_section()` includes sensor info → verify agent context includes robot description.
+
+- [ ] **Step 5: Run tests and commit**
 
 ```
-git commit -m "Add world state, runtime, robot CLI, ToolContext extension, and context injection"
+git commit -m "Add world state, robot runtime, and uniclaw robot CLI command"
 ```
 
 ---
@@ -751,10 +929,12 @@ git commit -m "Add robot brain integration tests and verify all features"
 
 | Task | Phase | What | New Deps | Est. LOC |
 |------|-------|------|----------|----------|
-| **0** | Pre | Image support in LLM types + 3 providers | — | ~150 |
+| **F1** | Foundation | Image support in LLM types + 3 providers | — | ~150 |
+| **F2** | Foundation | Extend ToolContext + Agent + ContextBuilder + robot module stubs | — | ~80 |
+| **F3** | Foundation | Extract CLI commands from main.rs | — | ~50 (net, mostly moving code) |
 | **1** | 3a | HardwareBridge trait + MockBridge | — | ~150 |
 | **2** | 3a | robot.toml parser | — | ~300 |
-| **3** | 3a | World state + runtime + CLI + ToolContext + context injection | — | ~400 |
+| **3** | 3a | World state + runtime + robot CLI command | — | ~350 |
 | **4** | 3b | Action types + executor | — | ~200 |
 | **5** | 3b | Robot action tools (set_servo, say, get_sensor, etc.) | — | ~250 |
 | **6** | 3b | Safety monitor + expression parser | — | ~200 |
@@ -763,7 +943,7 @@ git commit -m "Add robot brain integration tests and verify all features"
 | **9** | 3e | Voice: cloud STT + cloud TTS + VAD + audio I/O | cpal (feature) | ~350 |
 | **10** | 4 | ROS2 bridge + ROS2 tools | tokio-tungstenite | ~300 |
 | **11** | — | Integration tests + verification | — | ~200 |
-| | | **Total** | | **~3,100** |
+| | | **Total** | | **~3,180** |
 
 ### Dependency Summary
 
@@ -780,24 +960,37 @@ No `ort` (ONNX Runtime) dependency in this phase. Local TTS (Piper) deferred to 
 ### Task Dependencies
 
 ```
-Task 0 (image support) ←── Task 8 (perception needs images)
+FOUNDATION (must complete first, in order):
+  F1 (image support) → F2 (ToolContext/Agent/Context extensions) → F3 (main.rs refactor)
 
-Task 1 (bridge trait) ←── Task 4 (executor uses bridge)
-                       ←── Task 7 (serial implements bridge)
-                       ←── Task 10 (ros2 implements bridge)
+PHASE 3a (after foundation):
+  Task 1 (bridge trait) ←── Task 4 (executor uses bridge)
+                         ←── Task 7 (serial implements bridge)
+                         ←── Task 10 (ros2 implements bridge)
 
-Task 2 (robot.toml) ←── Task 3 (runtime loads description)
-                     ←── Task 5 (tools auto-register from description)
-                     ←── Task 6 (safety rules from description)
+  Task 2 (robot.toml) ←── Task 3 (runtime loads description)
+                       ←── Task 5 (tools auto-register from description)
+                       ←── Task 6 (safety rules from description)
 
-Task 3 (runtime + ToolContext) ←── Task 4 (executor wired into runtime)
-                                ←── Task 5 (tools use ToolContext.action_tx)
-                                ←── Task 6 (safety wired into runtime)
+  Task 3 (runtime + CLI) ←── Task 4 (executor wired into runtime)
+                          ←── Task 5 (tools use ToolContext.action_tx)
+                          ←── Task 6 (safety wired into runtime)
 
-Task 4 (action executor) ←── Task 5 (tools send ActionCommands)
-                          ←── Task 9 (Speak action plays audio)
+PHASE 3b (after 3a):
+  Task 4 (action executor) ←── Task 5 (tools send ActionCommands)
+                            ←── Task 9 (Speak action plays audio)
 
-Tasks 0-6 are the core. Tasks 7-10 are independent extensions. Task 11 is final.
+INDEPENDENT EXTENSIONS (after core):
+  Task 7 (serial bridge) — independent, needs Task 1
+  Task 8 (perception) — needs Task F1 + Task 3
+  Task 9 (voice) — needs Task 4
+  Task 10 (ROS2) — needs Task 1
+
+FINAL:
+  Task 11 (integration tests) — after all others
+
+Recommended execution order:
+  F1 → F2 → F3 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
 ```
 
 ### Communication Architecture (Simplified from v1)
