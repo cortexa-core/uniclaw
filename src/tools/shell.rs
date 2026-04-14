@@ -183,6 +183,8 @@ shell_timeout_secs = 5
             data_dir: dir.to_path_buf(),
             session_id: "test".into(),
             config: Arc::new(config),
+            action_tx: None,
+            world_rx: None,
         }
     }
 
@@ -248,6 +250,8 @@ shell_allowed_commands = []
             data_dir: dir.path().to_path_buf(),
             session_id: "test".into(),
             config: Arc::new(config),
+            action_tx: None,
+            world_rx: None,
         };
         let result = ShellExecTool
             .execute(json!({"command": "echo hello"}), &ctx)

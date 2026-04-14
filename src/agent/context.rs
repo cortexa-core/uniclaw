@@ -13,6 +13,8 @@ pub struct ContextBuilder {
     skill_manager: Option<SkillManager>,
     ttl: Duration,
     budgets: ContextBudgets,
+    robot_prompt: Option<String>,
+    world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
 }
 
 struct CachedSystem {
@@ -70,7 +72,20 @@ impl ContextBuilder {
             skill_manager: None,
             ttl: Duration::from_secs(ttl_secs),
             budgets,
+            robot_prompt: None,
+            world_rx: None,
         }
+    }
+
+    /// Set robot-specific context: a static prompt and a live world state receiver.
+    #[allow(dead_code)]
+    pub fn set_robot_context(
+        &mut self,
+        robot_prompt: String,
+        world_rx: tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>,
+    ) {
+        self.robot_prompt = Some(robot_prompt);
+        self.world_rx = Some(world_rx);
     }
 
     /// Set available tool names for skill gating
@@ -165,6 +180,14 @@ impl ContextBuilder {
             if !skills.is_empty() {
                 parts.push(format!("## Active Skills\n\n{skills}"));
             }
+        }
+
+        // 7. Robot context (static prompt + live world state)
+        if let Some(ref prompt) = self.robot_prompt {
+            parts.push(prompt.clone());
+        }
+        if let Some(ref rx) = self.world_rx {
+            parts.push(rx.borrow().to_context_section());
         }
 
         Ok(parts.join("\n\n---\n\n"))

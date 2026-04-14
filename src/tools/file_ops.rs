@@ -251,6 +251,8 @@ mod tests {
             config: Arc::new(
                 toml::from_str("[agent]\n[llm]\nprovider=\"anthropic\"\nmodel=\"test\"").unwrap(),
             ),
+            action_tx: None,
+            world_rx: None,
         }
     }
 

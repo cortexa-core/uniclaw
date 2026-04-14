@@ -3,6 +3,7 @@ mod channels;
 mod config;
 mod llm;
 mod mcp;
+mod robot;
 mod server;
 mod tools;
 mod utils;

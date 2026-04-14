@@ -19,6 +19,8 @@ pub struct Agent {
     config: AgentConfig,
     data_dir: PathBuf,
     full_config: Arc<Config>,
+    pub action_tx: Option<tokio::sync::mpsc::Sender<crate::robot::bridge::HardwareCommand>>,
+    pub world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
 }
 
 pub struct AgentConfig {
@@ -129,6 +131,8 @@ impl Agent {
             config: agent_config,
             full_config: Arc::new(config.clone()),
             data_dir,
+            action_tx: None,
+            world_rx: None,
         }
     }
 
@@ -249,6 +253,8 @@ impl Agent {
                         data_dir: self.data_dir.clone(),
                         session_id: input.session_id.clone(),
                         config: self.full_config.clone(),
+                        action_tx: self.action_tx.clone(),
+                        world_rx: self.world_rx.clone(),
                     };
 
                     let results: Vec<ToolResult> =

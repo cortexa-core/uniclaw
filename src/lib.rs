@@ -3,6 +3,7 @@ pub mod channels;
 pub mod config;
 pub mod llm;
 pub mod mcp;
+pub mod robot;
 pub mod server;
 pub mod tools;
 pub mod utils;

@@ -30,6 +30,10 @@ pub struct ToolContext {
     #[allow(dead_code)] // available for future tool use
     pub session_id: String,
     pub config: Arc<Config>,
+    #[allow(dead_code)] // available for robot tools
+    pub action_tx: Option<tokio::sync::mpsc::Sender<crate::robot::bridge::HardwareCommand>>,
+    #[allow(dead_code)] // available for robot tools
+    pub world_rx: Option<tokio::sync::watch::Receiver<crate::robot::world_state::WorldState>>,
 }
 
 #[async_trait]
@@ -125,6 +129,8 @@ mod tests {
                 toml::from_str::<Config>("[agent]\n[llm]\nprovider=\"anthropic\"\nmodel=\"test\"")
                     .unwrap(),
             ),
+            action_tx: None,
+            world_rx: None,
         }
     }
 
