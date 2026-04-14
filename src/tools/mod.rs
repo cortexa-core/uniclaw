@@ -5,6 +5,8 @@ pub mod get_time;
 pub mod http_fetch;
 pub mod memory_ops;
 pub mod registry;
+#[allow(dead_code)]
+pub mod robot_actions;
 pub mod shell;
 pub mod system;
 
