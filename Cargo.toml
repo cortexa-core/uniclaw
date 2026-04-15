@@ -50,6 +50,7 @@ mime_guess = "2"
 
 # Channels (optional)
 teloxide = { version = "0.13", features = ["macros"], optional = true }
+tokio-serial = { version = "5", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -58,6 +59,7 @@ filetime = "0.2"
 [features]
 default = []
 telegram = ["teloxide"]
+serial = ["dep:tokio-serial"]
 
 [profile.release]
 lto = true
